@@ -9,7 +9,7 @@
 
 /* Phase 4 browser media runtime */
 .camera-preview{position:relative;width:min(720px,86vw);height:min(46vh,430px);overflow:hidden;border-radius:28px;background:#06152e;border:1px solid #75a8ee61;box-shadow:0 30px 70px #0007;margin-bottom:22px}
-.camera-preview video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.camera-preview video{width:100%;height:100%;object-fit:contain;transform:scaleX(-1)}
 .camera-fallback{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:linear-gradient(145deg,#102a4e,#173d6a);color:#b9d1ef;padding:25px}
 .camera-fallback>span{font-size:92px;color:#7599c8}.camera-fallback p{max-width:560px;margin:0;color:#a9c0df;line-height:1.5}
 .face-frame{position:absolute;inset:11% 24%;border:2px solid #71d6ff;border-radius:46% 46% 42% 42%;box-shadow:0 0 32px #53c9ff35}
@@ -49,3 +49,53 @@
 .thank-you-runtime small{color:#7898c5}.return-idle{animation:kiosk-exit .5s ease both}@keyframes kiosk-exit{to{opacity:0;transform:scale(.97)}}
 @media(max-width:800px){.assistant-avatar-runtime{width:108px;height:108px;border-radius:36px}.assistant-rings{display:none}.production-idle h1{font-size:54px}.wizard-progress li{font-size:8px}.registration-step-card{padding:24px}.wizard-fields,.registration-capture-step{grid-template-columns:1fr}.registration-wizard{overflow:auto;justify-content:flex-start;padding-top:12px}.registration-capture-step .camera-preview{height:280px}.voice-chat-heading .assistant-avatar-runtime{display:none}}
 @media(prefers-reduced-motion:reduce){.kiosk-transition,.assistant-avatar-runtime,.assistant-rings i,.assistant-wave,.countdown-animation,.verification-portrait>i,.verification-progress i,.success-animation i,.presence-pulse i{animation-duration:.01ms!important;animation-iteration-count:1!important}}
+.assistant-stage { gap: 14px; }
+.recognition-stage { width:min(1500px,96vw); height:calc(100vh - 150px); display:grid; grid-template-columns:minmax(0,1.25fr) minmax(340px,.75fr); gap:clamp(24px,4vw,64px); align-items:center; }
+.recognition-camera { width:100%; }
+.recognition-camera .camera-preview { width:100%; height:min(66vh,720px); min-height:420px; margin:0; border-radius:36px; background:#020917; }
+.recognition-copy { display:flex; flex-direction:column; align-items:flex-start; justify-content:center; text-align:left; }
+.recognition-copy .assistant-avatar-runtime { width:104px; height:104px; border-radius:34px; margin-bottom:28px; }
+.recognition-copy .assistant-face { transform:scale(.72); }
+.recognition-copy h1 { margin:12px 0; font-size:clamp(38px,4vw,62px); line-height:1.08; }
+.recognition-copy p { margin:0 0 14px; font-size:clamp(18px,1.7vw,27px); color:#d5e7ff; line-height:1.45; }
+.recognition-copy small { max-width:470px; margin-bottom:28px; color:#91acd1; font-size:15px; line-height:1.6; }
+.recognition-copy button { min-width:280px; min-height:64px; font-size:16px; }
+.unknown-face-icon { font-size:64px; margin-bottom:4px; }
+.quality-indicator { display:flex; align-items:center; gap:10px; margin-top:14px; color:#9cb8dc; font-size:13px; }
+.quality-indicator i { width:12px; height:12px; border-radius:50%; background:#f0b14b; box-shadow:0 0 14px #f0b14b88; animation:pulse 1.2s infinite; }
+.quality-indicator.ready { color:#79e7b2; }
+.quality-indicator.ready i { background:#50e6a1; box-shadow:0 0 16px #50e6a199; }
+.welcome-experience { width:min(1250px,95vw); display:grid; grid-template-columns:minmax(360px,.9fr) minmax(430px,1.1fr); gap:52px; align-items:center; }
+.welcome-frozen-frame { position:relative; width:100%; aspect-ratio:16/9; overflow:hidden; border-radius:34px; background:#020917; border:2px solid #49db98; box-shadow:0 0 0 12px #49db9812,0 28px 80px #0008; }
+.welcome-frozen-frame img { width:100%; height:100%; object-fit:contain; transform:scaleX(-1); }
+.frozen-success-ring { position:absolute; inset:0; display:grid; place-items:center; background:radial-gradient(circle,#0ecb8522 0 20%,transparent 55%); }
+.frozen-success-ring:before,.frozen-success-ring:after { content:""; position:absolute; width:150px; height:150px; border:4px solid #63ecac; border-radius:50%; animation:success-ring 1.5s ease-out infinite; }
+.frozen-success-ring:after { animation-delay:.5s; }
+.frozen-success-ring span { width:92px; height:92px; display:grid; place-items:center; border-radius:50%; background:#139765; color:white; font-size:52px; box-shadow:0 0 38px #46dfa2; }
+.welcome-smile h1 { margin:0; font-size:clamp(42px,4vw,64px); }
+.welcome-smile h2 { margin:8px 0 12px; max-width:650px; font-size:clamp(30px,3.2vw,52px); color:#73e3ae; line-height:1.12; }
+.assistant-avatar-runtime.happy { animation: assistant-happy 1.1s ease-in-out infinite; }
+.assistant-avatar-runtime.unknown { animation: assistant-unknown 2.8s ease-in-out infinite; }
+.assistant-avatar-runtime.error { animation: assistant-error 1.8s ease-in-out infinite; }
+@keyframes assistant-happy { 50% { transform: translateY(-12px) scale(1.04); } }
+@keyframes assistant-unknown { 50% { transform: rotate(-7deg); } }
+@keyframes assistant-error { 50% { opacity: .55; filter: saturate(.4); } }
+.kiosk-dev-panel pre { max-height: 240px; overflow: auto; font-size: 11px; text-align: left; }
+@media (prefers-reduced-motion: reduce) { .assistant-avatar-runtime { animation: none !important; } }
+.tracking-diagnostics { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:4; }
+.tracking-face { stroke:#50efab; stroke-width:3; }
+.tracking-diagnostics.developer .tracking-face.waiting { stroke:#f3c15d; }
+.tracking-box { rx:18; filter:drop-shadow(0 0 8px currentColor); }
+.tracking-pulse { rx:22; opacity:.55; animation:tracking-pulse 1.5s ease-out infinite; transform-box:fill-box; transform-origin:center; }
+.tracking-landmark { fill:#7ff7c0; stroke:none; opacity:.78; }
+.confidence-base { stroke:#ffffff35; stroke-width:6; fill:#06152ecc; }
+.confidence-progress { stroke:#55edaa; stroke-width:6; stroke-linecap:round; transform:rotate(-90deg); transform-box:fill-box; transform-origin:center; transition:stroke-dasharray .25s ease; }
+.tracking-face text { fill:#fff; stroke:none; font-size:18px; font-weight:700; paint-order:stroke; }
+@keyframes tracking-pulse { from { opacity:.7; transform:scale(.97); } to { opacity:0; transform:scale(1.08); } }
+@media(max-width:900px) { .recognition-stage,.welcome-experience { grid-template-columns:1fr; overflow:auto; padding:12px 0 28px; } .recognition-camera .camera-preview { height:48vh; min-height:300px; } .recognition-copy { align-items:center; text-align:center; } .welcome-frozen-frame { max-height:42vh; } }
+.assistant-avatar-runtime.listening { animation: assistant-listen 1.5s ease-in-out infinite; }
+.assistant-avatar-runtime.greeting { animation: assistant-greet 1.8s ease-in-out infinite; }
+.assistant-avatar-runtime.goodbye { animation: assistant-goodbye 2s ease-in-out infinite; }
+@keyframes assistant-listen { 50% { transform: scale(1.06); } }
+@keyframes assistant-greet { 50% { transform: translateY(-8px) rotate(3deg); } }
+@keyframes assistant-goodbye { 50% { transform: rotate(-4deg); opacity: .8; } }

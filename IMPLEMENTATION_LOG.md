@@ -93,3 +93,27 @@ Verification: 5 frontend runtime tests passed, strict TypeScript/Vite production
 - Camera failures now open the recoverable permission screen instead of being misclassified as an unknown face.
 
 Verification: 7 frontend runtime tests passed, production build passed, and the live kiosk route returned HTTP 200.
+
+
+## 2026-09-05 — Realtime assistant runtime
+
+Replaced the active snapshot/countdown kiosk with a duplex WebSocket stream, per-connection face tracks, quality gates and three consecutive same-identity matches. Added client acceptance before identity persistence, camera teardown before welcome, automatic quality-approved enrollment, unknown-user timeout with continued recognition, and presence-loss reset. Existing database, Gemini service and backend business endpoints are preserved.
+
+Added centralized event bus, guarded runtime transition graph, transport backpressure/reconnect/deadlines, stream-based AI/voice transcript commands, reusable avatar renderer, automatic STT restart after silence and microphone-error keyboard fallback. Hardened Electron renderer permissions/navigation/IPC, switched sandbox preload to CommonJS, and added diagnostics and an explicit physical-presence integration boundary.
+
+Verification and deployment limits are recorded in docs/kiosk/TESTING_REALTIME.md and ELECTRON_READY.md. Physical hardware, liveness, recognition calibration, secure biometric templates, device authentication and a production speech provider remain acceptance gates. No production-readiness certification or RAG completion is claimed.
+
+Final verification: 34 backend tests passed, 13 frontend tests passed, frontend production build passed, Electron main/preload syntax checks passed, and the idle browser layout was visually inspected. No database schema files changed.
+
+## 2026-09-05 — Fullscreen native-resolution vision pass
+
+- Enlarged the active camera view to roughly half the kiosk workspace and changed all camera rendering to `object-fit: contain`, preserving the source aspect ratio without stretching.
+- Added `CameraManager`; camera capture now requests 1080p/30 fps with a 720p minimum and sends native-resolution frames. CSS preview dimensions no longer affect recognition input.
+- Split vision responsibilities into `VisionEngine`, `PresenceDetector`, `FaceDetector`, `FaceTracker`, `QualityEstimator`, `RecognitionService`, `IdentityVoting`, `SessionController`, and `EventPublisher` while retaining the existing WebSocket envelope and backend business services.
+- Changed active capture scheduling to a 33 ms target with one-frame acknowledgement backpressure. Detection runs for each accepted frame; recognition is limited to stable quality-approved tracks at a 500 ms cadence.
+- Standardized runtime event values to lower snake case, including the required presence, camera, face quality, recognition, identity, registration, voice, and reset events.
+- Added landmarks, a green tracking rectangle, confidence-ring animation, and developer-only Track ID/numeric confidence/FPS/latency details.
+- Reworked unknown-user UX to keep recognition active with only the face-registration action. Removed guest and face-retry actions from the active kiosk flow.
+- Added a frozen final frame and animated success presentation with the recognized student name. The MediaStream is stopped before identity confirmation is committed; welcome waits 2.5 seconds, speaks the greeting, then enters voice conversation.
+- Idle no longer starts a camera fallback. Production wake-up uses the Electron presence bridge; developer mode offers explicit presence simulation.
+- Added `docs/kiosk/VISION_ENGINE.md` and updated the realtime event, streaming, state, Electron, testing, and runtime documents.

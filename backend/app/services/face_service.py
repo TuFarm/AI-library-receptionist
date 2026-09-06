@@ -1,4 +1,5 @@
 import json
+import math
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -30,6 +31,9 @@ class FaceVerificationResult:
     result: str
     user_id: UUID | None
     confidence_score: float | None
+    distance: float | None = None
+    embedding_dimension: int | None = None
+    embedding_norm: float | None = None
 
 
 FaceCandidate = tuple[UUID, bytes | None, str | None]
@@ -79,29 +83,8 @@ class FaceService:
         else:
             candidate_list = list(candidates)
         if settings.face_provider == "local":
-            face_recognition = _load_local_library()
             probe = _extract_single_encoding(image_path)
-            valid_users: list[UUID] = []
-            known_encodings = []
-            for user_id, template_bytes, _template_ref in candidate_list:
-                if not template_bytes:
-                    continue
-                try:
-                    values = json.loads(template_bytes.decode("utf-8"))
-                    if isinstance(values, list) and len(values) == 128:
-                        known_encodings.append(values)
-                        valid_users.append(user_id)
-                except (UnicodeDecodeError, json.JSONDecodeError):
-                    continue
-            if not known_encodings:
-                return FaceVerificationResult("UNKNOWN_FACE", None, None)
-            distances = face_recognition.face_distance(known_encodings, probe)
-            best_index = min(range(len(distances)), key=lambda index: float(distances[index]))
-            confidence = round(max(0.0, min(1.0, 1.0 - float(distances[best_index]))), 4)
-            if confidence >= settings.face_confidence_threshold:
-                return FaceVerificationResult("SUCCESS", valid_users[best_index], confidence)
-            result = "LOW_CONFIDENCE" if confidence >= max(0.0, settings.face_confidence_threshold - 0.15) else "UNKNOWN_FACE"
-            return FaceVerificationResult(result, None, confidence)
+            return self.verify_encoding(probe, candidate_list)
 
         candidate_user_id = candidate_list[0][0] if candidate_list else None
         if "low" in image_path.name.lower():
@@ -112,3 +95,48 @@ class FaceService:
         if confidence < settings.face_confidence_threshold:
             return FaceVerificationResult("LOW_CONFIDENCE", None, confidence)
         return FaceVerificationResult("SUCCESS", candidate_user_id, confidence)
+
+    def verify_encoding(self, probe, candidates: Iterable[FaceCandidate]) -> FaceVerificationResult:
+        """Match one dlib 128D descriptor. The score is display calibration, not probability."""
+        return self.verify_prepared_encoding(probe, self.prepare_candidates(candidates))
+
+    @staticmethod
+    def prepare_candidates(candidates: Iterable[FaceCandidate]):
+        prepared = []
+        for user_id, template_bytes, _template_ref in candidates:
+            if not template_bytes:
+                continue
+            try:
+                values = [float(value) for value in json.loads(template_bytes.decode("utf-8"))]
+                if len(values) == 128 and all(math.isfinite(value) for value in values):
+                    prepared.append((user_id, values))
+            except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
+        return prepared
+
+    def verify_prepared_encoding(self, probe, prepared) -> FaceVerificationResult:
+        face_recognition = _load_local_library()
+        probe_values = [float(value) for value in probe]
+        dimension = len(probe_values)
+        norm = math.sqrt(sum(value * value for value in probe_values))
+        if dimension != 128 or not math.isfinite(norm):
+            raise FaceImageError("Đặc trưng khuôn mặt không hợp lệ.")
+        if not prepared:
+            return FaceVerificationResult("UNKNOWN_FACE", None, None, embedding_dimension=dimension, embedding_norm=round(norm, 4))
+        valid_users = [user_id for user_id, _encoding in prepared]
+        known_encodings = [encoding for _user_id, encoding in prepared]
+        # face_recognition.face_distance subtracts its arguments directly; both
+        # operands must be NumPy arrays rather than the JSON-derived Python lists.
+        known_array = face_recognition.api.np.asarray(known_encodings, dtype=float)
+        probe_array = face_recognition.api.np.asarray(probe_values, dtype=float)
+        distances = face_recognition.face_distance(known_array, probe_array)
+        best_index = min(range(len(distances)), key=lambda index: float(distances[index]))
+        distance = float(distances[best_index])
+        # Maps the operational distance threshold 0.60 to a readable score of 75%.
+        confidence = round(max(0.0, min(1.0, 1.0 - distance / 2.4)), 4)
+        common = {"confidence_score": confidence, "distance": round(distance, 4),
+                  "embedding_dimension": dimension, "embedding_norm": round(norm, 4)}
+        if distance <= settings.face_distance_threshold:
+            return FaceVerificationResult("SUCCESS", valid_users[best_index], **common)
+        result = "LOW_CONFIDENCE" if distance <= settings.face_distance_threshold + .15 else "UNKNOWN_FACE"
+        return FaceVerificationResult(result, None, **common)

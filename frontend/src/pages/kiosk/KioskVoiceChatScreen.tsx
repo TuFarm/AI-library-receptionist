@@ -1,3 +1,6 @@
+import { kioskEvents } from "../../runtime/eventBus";
+import { kioskStream } from "../../runtime/stream";
+import { RuntimeEvent as Events } from "../../runtime/events";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { AssistantAvatar, ListeningIndicator } from "../../components/kiosk/KioskAnimations";
 import { canActivateMicrophone, KIOSK_TIMING, wait } from "../../config/kioskRuntime";
@@ -20,6 +23,7 @@ export default function KioskVoiceChatScreen({ flow }: { flow: ReturnType<typeof
   const [input, setInput] = useState("");
   const [voiceState, setVoiceState] = useState<VoiceState>("VOICE_IDLE");
   const mountedRef = useRef(true);
+  const lifecycleRef = useRef(0);
   const autoListenRef = useRef(true);
   const processingRef = useRef(false);
   const greetingStartedRef = useRef(false);
@@ -32,11 +36,13 @@ export default function KioskVoiceChatScreen({ flow }: { flow: ReturnType<typeof
     const clean = text.trim();
     if (!clean || processingRef.current || tts.isSpeaking) return;
     processingRef.current = true;
+    const lifecycle = lifecycleRef.current;
     recognitionControlRef.current?.stop();
+    kioskStream.send(Events.aiListeningStopped);
     setVoiceState(method === "VOICE" ? "TRANSCRIBING" : "PROCESSING_AI");
     flow.setMicStatus("PROCESSING");
     const answer = await flow.submitMessage(clean, method, confidence);
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || lifecycle !== lifecycleRef.current) return;
     if (!answer) {
       processingRef.current = false;
       setVoiceState("VOICE_ERROR");
@@ -44,10 +50,12 @@ export default function KioskVoiceChatScreen({ flow }: { flow: ReturnType<typeof
       return;
     }
     setVoiceState("AI_SPEAKING");
+    kioskStream.send(Events.aiSpeakingStarted);
     await speakRef.current(answer);
-    if (!mountedRef.current) return;
+    kioskStream.send(Events.aiSpeakingFinished);
+    if (!mountedRef.current || lifecycle !== lifecycleRef.current) return;
     await wait(KIOSK_TIMING.postSpeechSilenceMs);
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || lifecycle !== lifecycleRef.current) return;
     processingRef.current = false;
     if (autoListenRef.current && recognitionControlRef.current?.supported) {
       setVoiceState("LISTENING");
@@ -75,7 +83,7 @@ export default function KioskVoiceChatScreen({ flow }: { flow: ReturnType<typeof
   }, [flow.setMicStatus, recognition.startListening, tts.isSpeaking]);
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => { mountedRef.current = false; lifecycleRef.current++; };
   }, []);
   useEffect(() => {
     if (recognition.error) {
@@ -91,6 +99,7 @@ export default function KioskVoiceChatScreen({ flow }: { flow: ReturnType<typeof
   useEffect(() => {
     if (greetingStartedRef.current) return;
     greetingStartedRef.current = true;
+    const lifecycle = lifecycleRef.current;
     const greeting = flow.user
       ? `Xin chào ${flow.user.full_name}. Tôi là trợ lý AI thư viện. Hôm nay tôi có thể giúp gì cho bạn?`
       : "Xin chào bạn. Tôi là trợ lý AI thư viện. Bạn cần hỗ trợ gì hôm nay?";
@@ -98,9 +107,11 @@ export default function KioskVoiceChatScreen({ flow }: { flow: ReturnType<typeof
       setVoiceState("AI_SPEAKING");
       flow.setMicStatus("PROCESSING");
       await speakRef.current(greeting);
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || lifecycle !== lifecycleRef.current) return;
       await wait(KIOSK_TIMING.postSpeechSilenceMs);
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || lifecycle !== lifecycleRef.current) return;
+      kioskEvents.publish(Events.voiceReady);
+      kioskStream.send(Events.voiceReady);
       if (recognitionControlRef.current?.supported) startListening();
       else { setVoiceState("VOICE_ERROR"); flow.setMicStatus("UNSUPPORTED"); }
     })();
@@ -118,6 +129,11 @@ export default function KioskVoiceChatScreen({ flow }: { flow: ReturnType<typeof
     setInput("");
     await processTurn(text, undefined, "TEXT");
   }
+  useEffect(() => {
+    kioskEvents.publish(Events.transcriptUpdated, { transcript: recognition.interimTranscript });
+    if (recognition.interimTranscript) { flow.touch(); kioskStream.send(Events.transcriptUpdated, { transcript: recognition.interimTranscript }); }
+  }, [recognition.interimTranscript]);
+  useEffect(() => { kioskStream.send(recognition.isListening ? Events.aiListeningStarted : Events.aiListeningStopped); }, [recognition.isListening]);
   const status = stateLabels[voiceState];
   return <div className="kiosk-chat voice-chat">
     <div className="voice-chat-heading">
@@ -139,7 +155,7 @@ export default function KioskVoiceChatScreen({ flow }: { flow: ReturnType<typeof
         {flow.isProcessing && <div className="kiosk-bubble assistant"><span>☺</span><p>Đang xử lý câu hỏi...</p></div>}
       </div>
     </div>
-    {!recognition.isSupported && <form className="kiosk-input fallback-input" onSubmit={send}>
+    {(!recognition.isSupported || recognition.error) && <form className="kiosk-input fallback-input" onSubmit={send}>
       <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Nhập bằng bàn phím" aria-label="Nhập câu hỏi bằng bàn phím"/>
       <button disabled={!input.trim() || flow.isProcessing || tts.isSpeaking}>Gửi câu hỏi ↑</button>
     </form>}

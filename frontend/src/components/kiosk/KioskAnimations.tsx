@@ -4,16 +4,7 @@ export function AnimatedTransition({ state, children }: { state: string; childre
   return <div className="kiosk-transition" data-kiosk-state={state}>{children}</div>;
 }
 
-export function AssistantAvatar({ mood = "idle", label = "Trợ lý AI" }: {
-  mood?: "idle" | "greeting" | "listening" | "thinking" | "speaking" | "goodbye";
-  label?: string;
-}) {
-  return <div className={`assistant-avatar-runtime ${mood}`} role="img" aria-label={label}>
-    <div className="assistant-face"><i/><i/><span/></div>
-    <div className="assistant-rings"><i/><i/><i/></div>
-    {mood === "greeting" || mood === "goodbye" ? <b className="assistant-wave">👋</b> : null}
-  </div>;
-}
+export { AssistantAvatar } from "./AssistantAvatar";
 
 export function ListeningIndicator({ active = true }: { active?: boolean }) {
   return <div className={`listening-indicator ${active ? "active" : ""}`} aria-label="Micro đang lắng nghe">

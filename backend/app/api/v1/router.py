@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from app.api.v1.routes import runtime
 
 from app.api.v1.routes import (
     admin,
@@ -20,6 +21,7 @@ from app.api.v1.routes import (
 )
 
 api_router = APIRouter()
+api_router.include_router(runtime.router, prefix="/kiosk", tags=["kiosk-stream"])
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(kiosk.router, prefix="/kiosk", tags=["kiosk"])
 api_router.include_router(health.router, prefix="/health", tags=["health"])

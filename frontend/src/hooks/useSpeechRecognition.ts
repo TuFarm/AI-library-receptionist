@@ -11,6 +11,10 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 export function useSpeechRecognition(onFinalTranscript?: (transcript: string, confidence?: number) => void) {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const listeningRef = useRef(false);
+  const desiredRef = useRef(false);
+  const generationRef = useRef(0);
+  const restartRef = useRef<number | undefined>(undefined);
+  const startRef = useRef<() => void>(() => undefined);
   const callbackRef = useRef(onFinalTranscript);
   const [transcript, setTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
@@ -23,8 +27,13 @@ export function useSpeechRecognition(onFinalTranscript?: (transcript: string, co
   const isSupported = Boolean(Recognition);
 
   const stopListening = useCallback(() => {
+    desiredRef.current = false;
+    generationRef.current++;
+    window.clearTimeout(restartRef.current);
     listeningRef.current = false;
-    recognitionRef.current?.stop();
+    recognitionRef.current?.abort();
+    recognitionRef.current = null;
+    setIsListening(false);
   }, []);
   const startListening = useCallback(() => {
     if (!Recognition) {
@@ -32,11 +41,14 @@ export function useSpeechRecognition(onFinalTranscript?: (transcript: string, co
       return;
     }
     if (listeningRef.current) return;
+    desiredRef.current = true;
+    const generation = ++generationRef.current;
     listeningRef.current = true;
     setTranscript(""); setInterimTranscript(""); setError(null);
     const recognition = new Recognition();
     recognition.lang = "vi-VN"; recognition.continuous = false; recognition.interimResults = true;
     recognition.onresult = (event) => {
+      if (generation !== generationRef.current) return;
       let finalText = ""; let interimText = ""; let finalConfidence: number | undefined;
       for (let index = event.resultIndex; index < event.results.length; index += 1) {
         const result = event.results[index];
@@ -51,16 +63,24 @@ export function useSpeechRecognition(onFinalTranscript?: (transcript: string, co
       }
     };
     recognition.onerror = (event) => {
+      if (generation !== generationRef.current) return;
+      if (event.error === "no-speech") return;
+      desiredRef.current = false;
       listeningRef.current = false;
       setIsListening(false);
       setError(event.error === "not-allowed"
         ? "Micro chưa được cấp quyền. Bạn vẫn có thể nhập câu hỏi bằng bàn phím."
         : "Không thể nhận dạng giọng nói. Vui lòng thử lại hoặc nhập câu hỏi.");
     };
-    recognition.onend = () => { listeningRef.current = false; setIsListening(false); };
+    recognition.onend = () => {
+      if (generation !== generationRef.current) return;
+      listeningRef.current = false; setIsListening(false);
+      if (desiredRef.current) restartRef.current = window.setTimeout(() => startRef.current(), 500);
+    };
     recognitionRef.current = recognition;
     try { recognition.start(); setIsListening(true); } catch { listeningRef.current = false; setError("Micro đang bận. Vui lòng đợi một chút rồi thử lại."); }
   }, [Recognition]);
-  useEffect(() => () => recognitionRef.current?.abort(), []);
+  startRef.current = startListening;
+  useEffect(() => () => { desiredRef.current = false; generationRef.current++; window.clearTimeout(restartRef.current); recognitionRef.current?.abort(); }, []);
   return { startListening, stopListening, transcript, interimTranscript, isListening, isSupported, confidence, error };
 }

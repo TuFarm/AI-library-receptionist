@@ -69,6 +69,62 @@ def test_mock_face_unknown_without_profiles(monkeypatch, tmp_path: Path):
     assert result.user_id is None
 
 
+def test_local_match_uses_distance_threshold_and_reports_embedding_metrics(monkeypatch):
+    from app.services import face_service
+    user_id = UUID("11111111-1111-1111-1111-111111111111")
+
+    class FakeArray(list):
+        def __sub__(self, other):
+            return FakeArray(a - b for a, b in zip(self, other))
+
+    class FakeNumpy:
+        @staticmethod
+        def asarray(values, dtype=None):
+            return FakeArray(FakeArray(row) if isinstance(row, list) else row for row in values)
+
+    class FakeLibrary:
+        api = SimpleNamespace(np=FakeNumpy())
+
+        @staticmethod
+        def face_distance(known, probe):
+            assert isinstance(known, FakeArray)
+            assert isinstance(probe, FakeArray)
+            return [0.55]
+
+    monkeypatch.setattr(face_service, "_load_local_library", lambda: FakeLibrary())
+    template = __import__("json").dumps([0.1] * 128).encode()
+    result = FaceService().verify_encoding([0.1] * 128, [(user_id, template, None)])
+    assert result.result == "SUCCESS"
+    assert result.user_id == user_id
+    assert result.distance == 0.55
+    assert result.confidence_score == 0.7708
+    assert result.embedding_dimension == 128
+
+
+def test_local_match_rejects_distance_above_operational_threshold(monkeypatch):
+    from app.services import face_service
+
+    class FakeNumpy:
+        @staticmethod
+        def asarray(values, dtype=None):
+            return tuple(tuple(row) if isinstance(row, list) else row for row in values)
+
+    class FakeLibrary:
+        api = SimpleNamespace(np=FakeNumpy())
+
+        @staticmethod
+        def face_distance(_known, _probe):
+            return [0.68]
+
+    monkeypatch.setattr(face_service, "_load_local_library", lambda: FakeLibrary())
+    template = __import__("json").dumps([0.1] * 128).encode()
+    result = FaceService().verify_encoding(
+        [0.1] * 128, [(UUID("11111111-1111-1111-1111-111111111111"), template, None)]
+    )
+    assert result.result == "LOW_CONFIDENCE"
+    assert result.user_id is None
+
+
 def test_gemini_mode_without_key_falls_back(monkeypatch):
     from app.services import ai_service
     monkeypatch.setattr(ai_service.settings, "ai_provider", "gemini")

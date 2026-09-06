@@ -1,15 +1,14 @@
+import { canTransition } from "../runtime/stateMachine";
+import { kioskEvents } from "../runtime/eventBus";
+import { kioskStream } from "../runtime/stream";
+import { RuntimeEvent as Events } from "../runtime/events";
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import { canStartFaceVerification, KIOSK_TIMING, wait } from "../config/kioskRuntime";
-import { aiApi, conversationApi, faceApi, kioskApi, MOCK_FALLBACK_ENABLED, voiceApi } from "../services/apiClient";
+import { KIOSK_TIMING } from "../config/kioskRuntime";
+import { conversationApi, faceApi, kioskApi, MOCK_FALLBACK_ENABLED } from "../services/apiClient";
 import type { CameraStatus, FaceRegistrationFields, FaceVerifyResult, KioskAction, KioskConversation, KioskFlowState, KioskMessage, KioskState, MessageInputMethod, MicStatus } from "../types/kiosk";
 
 const DEVICE_CODE = String(import.meta.env.VITE_KIOSK_DEVICE_CODE ?? "KIOSK_DEV_01");
 const FALLBACK_ANSWER = "Máy chủ đang tạm thời không phản hồi. Đây là chế độ thử nghiệm ngoại tuyến; vui lòng khởi động backend để nhận câu trả lời từ hệ thống.";
-const MOCK_USER = {
-  id: "00000000-0000-4000-8000-000000000001", student_code: "ITCSIU24092", full_name: "Phạm Hoàng Tuấn Tú",
-  faculty: "Khoa Công nghệ Thông tin", major: "Công nghệ thông tin", admission_year: 2024, student_year: 3,
-};
-
 export function initialState(): KioskFlowState {
   return {
     currentState: "IDLE", session: null, device: { code: DEVICE_CODE }, user: null, conversation: null,
@@ -27,16 +26,15 @@ export function reducer(state: KioskFlowState, action: KioskAction): KioskFlowSt
       currentState: state.currentState === "CAMERA_PERMISSION" ? "IDLE" : state.currentState, error: null, ...active };
     case "CAMERA_PERMISSION_DENIED": return { ...state, cameraStatus: "DENIED", currentState: "CAMERA_PERMISSION", error: action.error ?? null, ...active };
     case "START_FACE_SCAN": return { ...state, currentState: "CAMERA_PREPARING", error: null, ...active };
-    case "FACE_VERIFY_SUCCESS": return { ...state, lastFaceResult: action.result, user: action.result.user, currentState: "FACE_SUCCESS", isProcessing: false, ...active };
+    case "FACE_VERIFY_SUCCESS": if (!["CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING", "UNKNOWN_FACE", "IDENTITY_CONFIRMING"].includes(state.currentState)) return state; return { ...state, lastFaceResult: action.result, user: action.result.user, currentState: "FACE_RECOGNIZED", isProcessing: false, ...active };
     case "FACE_VERIFY_UNKNOWN": return { ...state, lastFaceResult: action.result, user: null, currentState: "UNKNOWN_FACE", isProcessing: false, ...active };
     case "FACE_VERIFY_FAILED": return { ...state, error: action.error, currentState: "UNKNOWN_FACE", isProcessing: false, ...active };
-    case "FACE_ENROLL_SUCCESS": return { ...state, lastFaceResult: action.result, user: action.result.user, currentState: "REGISTER_SUCCESS", isProcessing: false, ...active };
-    case "CONTINUE_AS_GUEST": return { ...state, user: null, currentState: "GREETING", error: null, ...active };
+    case "FACE_ENROLL_SUCCESS": if (state.currentState !== "REGISTER_PROCESSING") return state; return { ...state, lastFaceResult: action.result, user: action.result.user, currentState: "REGISTER_SUCCESS", isProcessing: false, ...active };
     case "START_CONVERSATION": {
       const greeting: KioskMessage = { id: crypto.randomUUID(), role: "assistant", text: state.user
         ? `Xin chào ${state.user.full_name}! Hôm nay tôi có thể giúp gì cho bạn?`
         : "Xin chào bạn, tôi là trợ lý AI thư viện. Bạn cần hỗ trợ gì hôm nay?" };
-      return { ...state, conversation: action.conversation, currentState: "VOICE_GREETING", messages: state.messages.length ? state.messages : [greeting], isProcessing: false, ...active };
+      return { ...state, conversation: action.conversation, currentState: "AI_GREETING", messages: state.messages.length ? state.messages : [greeting], isProcessing: false, ...active };
     }
     case "USER_MESSAGE_SUBMITTED": return { ...state, messages: [...state.messages, action.message], currentTranscript: action.message.text, currentState: "PROCESSING", isProcessing: true, ...active };
     case "AI_RESPONSE_RECEIVED": return { ...state, messages: [...state.messages, action.message], lastAiResponse: action.message.text, currentState: "AI_SPEAKING", isProcessing: false, mockFallbackActive: state.mockFallbackActive || Boolean(action.mockFallback), ...active };
@@ -47,13 +45,13 @@ export function reducer(state: KioskFlowState, action: KioskAction): KioskFlowSt
     case "RESET_TO_IDLE": return initialState();
     case "SET_ERROR": return { ...state, error: action.error, currentState: "ERROR", isProcessing: false, ...active };
     case "SET_CAMERA_STATUS": return { ...state, cameraStatus: action.status, ...active };
-    case "SET_MIC_STATUS": return { ...state, micStatus: action.status, ...active };
+    case "SET_MIC_STATUS": return { ...state, micStatus: action.status };
     case "SET_TRANSCRIPT": return { ...state, currentTranscript: action.transcript, ...active };
     case "SET_BOOK_DATA": return { ...state, selectedBookCategory: action.categoryId, suggestedBooks: action.books, ...active };
     case "SET_SURVEY": return { ...state, survey: action.survey, ...active };
     case "SET_PROCESSING": return { ...state, isProcessing: action.value, ...active };
     case "TOUCH": return { ...state, ...active };
-    case "TRANSITION": return { ...state, currentState: action.state, error: null, ...active };
+    case "TRANSITION": if (!canTransition(state.currentState, action.state)) return state; return { ...state, currentState: action.state, error: null, ...active };
   }
 }
 
@@ -61,8 +59,7 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
   const stateRef = useRef(state);
   const endedSessionRef = useRef<string | null>(null);
-  const verifyInFlightRef = useRef(false);
-  const lastVerifyAtRef = useRef(0);
+
   stateRef.current = state;
 
   const endCurrentSession = useCallback(async (exitReason: string) => {
@@ -70,27 +67,41 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
     if (!sessionId || endedSessionRef.current === sessionId) return;
     endedSessionRef.current = sessionId;
     try { await kioskApi.endSession(sessionId, exitReason); } catch { /* reset locally even if the backend is unavailable */ }
-    dispatch({ type: "END_SESSION" });
+
   }, []);
 
   const resetToIdle = useCallback(async (exitReason = "USER_EXIT") => {
-    await endCurrentSession(exitReason);
+    epoch.current++;
+    turnInFlight.current = false;
     dispatch({ type: "RESET_TO_IDLE" });
+    kioskEvents.publish(Events.sessionReset, { reason: exitReason });
+    kioskStream.send(Events.sessionReset, { reason: exitReason });
+    await endCurrentSession(exitReason);
   }, [endCurrentSession]);
 
+  const sessionStarting = useRef(false);
+  const epoch = useRef(0);
+  const turnInFlight = useRef(false);
   const startSession = useCallback(async () => {
+    if (sessionStarting.current || stateRef.current.currentState !== "IDLE") return false;
+    const currentEpoch = epoch.current;
+    sessionStarting.current = true;
     endedSessionRef.current = null;
     dispatch({ type: "SET_PROCESSING", value: true });
     try {
       const session = await kioskApi.startSession(DEVICE_CODE);
+      if (currentEpoch !== epoch.current) { void kioskApi.endSession(session.session_id, "ABANDONED_START").catch(() => undefined); sessionStarting.current = false; return false; }
       dispatch({ type: "START_SESSION", session });
     } catch (reason) {
+      if (currentEpoch !== epoch.current) { sessionStarting.current = false; return false; }
       if (!MOCK_FALLBACK_ENABLED) {
         dispatch({ type: "SET_ERROR", error: reason instanceof Error ? reason.message : "Không thể bắt đầu phiên kiosk." });
+        sessionStarting.current = false;
         return false;
       }
       dispatch({ type: "START_SESSION", session: { session_id: crypto.randomUUID(), device_id: "mock-device", status: "active" } });
     }
+    sessionStarting.current = false;
     return true;
   }, []);
 
@@ -99,29 +110,8 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
   const setCameraStatus = useCallback((status: CameraStatus) => dispatch({ type: "SET_CAMERA_STATUS", status }), []);
   const startFaceScan = useCallback(() => dispatch({ type: "START_FACE_SCAN" }), []);
 
-  const verifyFace = useCallback(async (imageBlob: Blob) => {
-    const now = Date.now();
-    if (!canStartFaceVerification(verifyInFlightRef.current, lastVerifyAtRef.current, now)) return false;
-    verifyInFlightRef.current = true;
-    lastVerifyAtRef.current = now;
-    dispatch({ type: "SET_PROCESSING", value: true });
-    dispatch({ type: "TRANSITION", state: "VERIFYING" });
-    const started = performance.now();
-    try {
-      const current = stateRef.current;
-      const result = await faceApi.verifyFace({ sessionId: current.session?.session_id, deviceCode: current.device.code, imageBlob });
-      await wait(Math.max(0, KIOSK_TIMING.minimumVerificationMs - (performance.now() - started)));
-      dispatch({ type: result.next_state === "WELCOME" && result.user ? "FACE_VERIFY_SUCCESS" : "FACE_VERIFY_UNKNOWN", result });
-    } catch (reason) {
-      await wait(Math.max(0, KIOSK_TIMING.minimumVerificationMs - (performance.now() - started)));
-      dispatch({ type: "FACE_VERIFY_FAILED", error: reason instanceof Error ? reason.message : "Không thể xác minh khuôn mặt." });
-    } finally {
-      verifyInFlightRef.current = false;
-    }
-    return true;
-  }, []);
-
   const enrollFace = useCallback(async (fields: FaceRegistrationFields, imageBlob: Blob) => {
+    const currentEpoch = epoch.current;
     dispatch({ type: "SET_PROCESSING", value: true });
     dispatch({ type: "TRANSITION", state: "REGISTER_PROCESSING" });
     try {
@@ -132,31 +122,22 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
       const result: FaceVerifyResult = {
         result: "SUCCESS", user: enrolled.user, confidence_score: enrolled.quality_score, next_state: "WELCOME",
       };
-      dispatch({ type: "FACE_ENROLL_SUCCESS", result });
+      if (currentEpoch === epoch.current) dispatch({ type: "FACE_ENROLL_SUCCESS", result });
       return enrolled;
     } catch (reason) {
+      if (currentEpoch !== epoch.current) throw reason;
       dispatch({ type: "TRANSITION", state: "REGISTER" });
       dispatch({ type: "SET_PROCESSING", value: false });
       throw reason;
     }
   }, []);
 
-  const simulateFace = useCallback((recognized: boolean) => {
-    const result: FaceVerifyResult = recognized
-      ? { result: "SUCCESS", user: MOCK_USER, confidence_score: 0.94, next_state: "WELCOME" }
-      : { result: "UNKNOWN_FACE", user: null, confidence_score: 0.2, next_state: "FACE_UNKNOWN" };
-    dispatch({ type: recognized ? "FACE_VERIFY_SUCCESS" : "FACE_VERIFY_UNKNOWN", result });
-  }, []);
-
   const logEvent = useCallback((event_type: string, content_summary?: string) => {
     const sessionId = stateRef.current.session?.session_id;
     if (sessionId) void kioskApi.logEvent(sessionId, { event_type, content_summary }).catch(() => undefined);
   }, []);
-  const continueAsGuest = useCallback(() => {
-    logEvent("GUEST_CONTINUED");
-    dispatch({ type: "CONTINUE_AS_GUEST" });
-  }, [logEvent]);
   const startConversation = useCallback(async (): Promise<KioskConversation | null> => {
+    const currentEpoch = epoch.current;
     if (stateRef.current.conversation) {
       dispatch({ type: "TRANSITION", state: "VOICE_LISTENING" });
       return stateRef.current.conversation;
@@ -167,9 +148,11 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
       const conversation = await conversationApi.startConversation({
         session_id: current.session?.session_id, user_id: current.user?.id,
       });
+      if (currentEpoch !== epoch.current) return null;
       dispatch({ type: "START_CONVERSATION", conversation });
       return conversation;
     } catch (reason) {
+      if (currentEpoch !== epoch.current) return null;
       if (MOCK_FALLBACK_ENABLED) {
         const conversation = { conversation_id: crypto.randomUUID(), status: "active" };
         dispatch({ type: "START_CONVERSATION", conversation });
@@ -182,25 +165,23 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
 
   const submitMessage = useCallback(async (text: string, inputMethod: MessageInputMethod = "TEXT", confidence?: number): Promise<string | null> => {
     const clean = text.trim();
-    if (!clean || stateRef.current.isProcessing) return null;
+    if (!clean || stateRef.current.isProcessing || turnInFlight.current) return null;
+    turnInFlight.current = true;
+    const currentEpoch = epoch.current;
     const conversation = stateRef.current.conversation ?? await startConversation();
-    if (!conversation) return null;
+    if (!conversation) { turnInFlight.current = false; return null; }
     dispatch({ type: "USER_MESSAGE_SUBMITTED", message: { id: crypto.randomUUID(), role: "user", text: clean, inputMethod } });
     try {
       const current = stateRef.current;
-      if (inputMethod === "VOICE") {
-        await voiceApi.sendBrowserTranscript({
-          session_id: current.session?.session_id, conversation_id: conversation.conversation_id,
-          transcript: clean, confidence_score: confidence,
-        });
-      }
-      const result = await aiApi.answer({
+      const result = await kioskStream.request({
         conversation_id: conversation.conversation_id, session_id: current.session?.session_id,
-        message_text: clean, save_user_message: inputMethod !== "VOICE",
+        message_text: clean, input_method: inputMethod, confidence_score: confidence,
       });
-      dispatch({ type: "AI_RESPONSE_RECEIVED", message: { id: crypto.randomUUID(), role: "assistant", text: result.answer }, mockFallback: result.provider === "mock" });
-      return result.answer;
+      if (currentEpoch !== epoch.current) return null;
+      dispatch({ type: "AI_RESPONSE_RECEIVED", message: { id: crypto.randomUUID(), role: "assistant", text: String(result.answer) }, mockFallback: result.provider === "mock" });
+      return String(result.answer);
     } catch (reason) {
+      if (currentEpoch !== epoch.current) return null;
       if (MOCK_FALLBACK_ENABLED) {
         dispatch({ type: "AI_RESPONSE_RECEIVED", message: { id: crypto.randomUUID(), role: "assistant", text: FALLBACK_ANSWER }, mockFallback: true });
         return FALLBACK_ANSWER;
@@ -208,6 +189,7 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
       dispatch({ type: "SET_ERROR", error: reason instanceof Error ? reason.message : "Không thể nhận câu trả lời từ AI." });
       return null;
     }
+    finally { if (currentEpoch === epoch.current) turnInFlight.current = false; }
   }, [startConversation]);
 
   const setMicStatus = useCallback((status: MicStatus) => dispatch({ type: "SET_MIC_STATUS", status }), []);
@@ -218,16 +200,17 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
   const touch = useCallback(() => dispatch({ type: "TOUCH" }), []);
 
   useEffect(() => {
-    if (state.currentState === "PRESENCE_DETECTED") {
-      const id = window.setTimeout(() => dispatch({ type: "START_FACE_SCAN" }), KIOSK_TIMING.presenceConfirmationMs);
+    if (["PRESENCE_DETECTED", "WAKE_UP", "GREETING"].includes(state.currentState)) {
+      const next: KioskState = state.currentState === "PRESENCE_DETECTED" ? "WAKE_UP" : state.currentState === "WAKE_UP" ? "GREETING" : "CAMERA_PREPARING";
+      const id = window.setTimeout(() => dispatch({ type: "TRANSITION", state: next }), state.currentState === "GREETING" ? 800 : 150);
       return () => window.clearTimeout(id);
     }
-    if (state.currentState === "FACE_SUCCESS") {
-      const id = window.setTimeout(() => dispatch({ type: "TRANSITION", state: "GREETING" }), 800);
+    if (state.currentState === "FACE_RECOGNIZED" || state.currentState === "STOP_CAMERA") {
+      const id = window.setTimeout(() => dispatch({ type: "TRANSITION", state: state.currentState === "FACE_RECOGNIZED" ? "STOP_CAMERA" : "WELCOME" }), 100);
       return () => window.clearTimeout(id);
     }
     if (state.currentState === "REGISTER_SUCCESS") {
-      const id = window.setTimeout(() => dispatch({ type: "TRANSITION", state: "GREETING" }), KIOSK_TIMING.registrationSuccessMs);
+      const id = window.setTimeout(() => dispatch({ type: "TRANSITION", state: "WELCOME" }), KIOSK_TIMING.registrationSuccessMs);
       return () => window.clearTimeout(id);
     }
     if (state.currentState === "THANK_YOU") {
@@ -241,7 +224,7 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
   }, [state.currentState, resetToIdle]);
 
   useEffect(() => {
-    if (state.currentState === "IDLE" || state.isProcessing || state.micStatus === "LISTENING" || state.micStatus === "PROCESSING") return;
+    if (state.currentState === "IDLE" || state.isProcessing || state.micStatus === "PROCESSING") return;
     const elapsed = Date.now() - state.lastActivityAt;
     const id = window.setTimeout(() => { void resetToIdle("TIMEOUT"); }, Math.max(0, timeoutSeconds * 1000 - elapsed));
     return () => window.clearTimeout(id);
@@ -253,7 +236,13 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
     return () => { window.removeEventListener("pointerdown", onActivity); window.removeEventListener("keydown", onActivity); };
   }, []);
 
-  return { ...state, dispatch, startSession, cameraGranted, cameraDenied, setCameraStatus, startFaceScan, verifyFace,
-    enrollFace, simulateFace, continueAsGuest, startConversation, submitMessage, setMicStatus, openBooks, openSurvey,
+  useEffect(() => {
+    const events: Partial<Record<KioskState, string>> = { WELCOME: "welcome_started", SURVEY: "survey_started", THANK_YOU: "survey_completed", IDLE: Events.sessionReset };
+    const event = events[state.currentState];
+    if (event) { kioskEvents.publish(event); kioskStream.send(event); }
+  }, [state.currentState]);
+
+  return { ...state, dispatch, startSession, cameraGranted, cameraDenied, setCameraStatus, startFaceScan,
+    enrollFace, startConversation, submitMessage, setMicStatus, openBooks, openSurvey,
     completeSurvey, transitionTo, touch, resetToIdle };
 }

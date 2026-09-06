@@ -1,4 +1,4 @@
-import type { ActiveSurvey, BookCategory, FaceEnrollmentResult, FaceRegistrationFields, FaceVerifyResult, KioskConversation, KioskMessage, KioskSession, SuggestedBook } from "../types/kiosk";
+import type { ActiveSurvey, BookCategory, FaceEnrollmentResult, FaceRegistrationFields, KioskConversation, KioskMessage, KioskSession, SuggestedBook } from "../types/kiosk";
 
 type ApiEnvelope<T> = { success: boolean; message: string; data: T; error?: { code: string; details?: unknown } };
 const configuredBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "http://localhost:8000";
@@ -11,7 +11,7 @@ export class ApiClientError extends Error {
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API_ROOT}${path}`, { ...options, headers: options.body instanceof FormData ? options.headers : { "Content-Type": "application/json", ...options.headers } });
+    response = await fetch(`${API_ROOT}${path}`, { signal: AbortSignal.timeout(30000), ...options, headers: options.body instanceof FormData ? options.headers : { "Content-Type": "application/json", ...options.headers } });
   } catch { throw new ApiClientError("Không thể kết nối máy chủ. Vui lòng kiểm tra backend hoặc thử lại."); }
   let body: ApiEnvelope<T> | undefined;
   try { body = await response.json() as ApiEnvelope<T>; } catch { /* invalid server response */ }
@@ -29,12 +29,6 @@ export const kioskApi = {
   logEvent: (sessionId: string, event: { event_type: string; input_method?: string; content_summary?: string; success?: boolean }) => apiClient.post<{ event_id: string }>(`/kiosk/sessions/${sessionId}/events`, event),
 };
 export const faceApi = {
-  verifyFace: ({ sessionId, deviceCode, imageBlob }: { sessionId?: string; deviceCode: string; imageBlob: Blob }) => {
-    const form = new FormData();
-    if (sessionId) form.append("session_id", sessionId);
-    form.append("device_code", deviceCode); form.append("image_file", imageBlob, "kiosk-face.jpg");
-    return apiClient.postForm<FaceVerifyResult>("/face/verify", form);
-  },
   enrollFace: ({ sessionId, deviceCode, imageBlob, fields }: {
     sessionId?: string; deviceCode: string; imageBlob: Blob; fields: FaceRegistrationFields;
   }) => {

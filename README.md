@@ -1,3 +1,7 @@
+> **2026-09-05 runtime update:** The active kiosk now uses continuous WebSocket face tracking and three-observation recognition, an assistant-centered UI and automatic voice turns. The older capture/countdown instructions below are historical. See [runtime architecture](docs/kiosk/RUNTIME_ARCHITECTURE.md), [event system](docs/kiosk/EVENT_SYSTEM.md), [stream protocol](docs/kiosk/STREAMING_ARCHITECTURE.md), [state machine](docs/kiosk/STATE_MACHINE.md), [Electron readiness](docs/kiosk/ELECTRON_READY.md), and [testing/report](docs/kiosk/TESTING_REALTIME.md).
+>
+> Realtime detection requires the optional local FaceID dependencies. Use `FACE_PROVIDER=local` for actual matching. Idle wake-up requires an external presence sensor; developer mode provides explicit presence simulation while keeping the camera off at idle. Browser speech support, hardware quality thresholds and unattended Windows deployment still require validation. The database and Gemini business integration were not redesigned.
+
 # Trợ lý Lễ tân Thư viện AI
 
 Monorepo cho trợ lý lễ tân/kiosk thư viện đại học, gồm backend FastAPI, PostgreSQL, Redis và giao diện React/TypeScript. Đây không phải hệ thống quản lý thư viện hay mượn/trả.
@@ -355,8 +359,8 @@ Luôn đọc và review migration được sinh ra trước khi chạy trên dat
 Đã sẵn sàng để thử trên laptop:
 
 - session kiosk, timeout và tự trở về idle;
-- camera permission, preview, canvas JPEG capture và multipart face verification;
-- recognized/unknown/guest welcome;
+- camera permission, fullscreen aspect-preserving preview, native-resolution JPEG streaming and automatic recognition;
+- recognized/unknown welcome with continuous scanning and no guest/retry controls;
 - form tạo/cập nhật user và đăng ký mẫu khuôn mặt;
 - FaceID local tùy chọn với embedding 128 chiều và so khớp nhiều profile;
 - Gemini REST với lịch sử hội thoại, system instruction tiếng Việt và fallback có ghi nhận;

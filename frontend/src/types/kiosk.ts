@@ -1,6 +1,6 @@
 export type KioskState =
   | "IDLE" | "CAMERA_PERMISSION" | "PRESENCE_DETECTED" | "CAMERA_PREPARING"
-  | "FACE_STABILIZING" | "COUNTDOWN" | "FACE_CAPTURE" | "VERIFYING"
+  | "WAKE_UP" | "FACE_TRACKING" | "FACE_RECOGNIZING" | "IDENTITY_CONFIRMING" | "FACE_RECOGNIZED" | "STOP_CAMERA" | "WELCOME" | "AI_GREETING"
   | "FACE_SUCCESS" | "GREETING" | "VOICE_GREETING" | "VOICE_LISTENING"
   | "USER_SPEAKING" | "PROCESSING" | "AI_SPEAKING" | "LISTENING"
   | "UNKNOWN_FACE" | "REGISTER" | "REGISTER_PROCESSING" | "REGISTER_SUCCESS"
@@ -52,7 +52,7 @@ export type KioskAction =
   | { type: "START_FACE_SCAN" } | { type: "FACE_VERIFY_SUCCESS"; result: FaceVerifyResult }
   | { type: "FACE_VERIFY_UNKNOWN"; result: FaceVerifyResult } | { type: "FACE_VERIFY_FAILED"; error: string }
   | { type: "FACE_ENROLL_SUCCESS"; result: FaceVerifyResult }
-  | { type: "CONTINUE_AS_GUEST" } | { type: "START_CONVERSATION"; conversation: KioskConversation }
+  | { type: "START_CONVERSATION"; conversation: KioskConversation }
   | { type: "USER_MESSAGE_SUBMITTED"; message: KioskMessage }
   | { type: "AI_RESPONSE_RECEIVED"; message: KioskMessage; mockFallback?: boolean }
   | { type: "OPEN_BOOK_SUGGESTIONS" } | { type: "OPEN_SURVEY" } | { type: "SURVEY_SUBMITTED" }

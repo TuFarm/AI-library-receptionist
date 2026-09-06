@@ -1,18 +1,19 @@
-import { useState, type FormEvent, type Ref } from "react";
+import { useEffect, useRef, useState, type FormEvent, type Ref } from "react";
 import { ScanningAnimation } from "../../components/kiosk/KioskAnimations";
 import { CameraPreview } from "../../components/kiosk/CameraPreview";
 import type { CameraStatus, FaceRegistrationFields } from "../../types/kiosk";
 
 type WizardStep = "identity" | "academic" | "capture" | "processing";
-const progressSteps = ["Thông tin", "Chụp khuôn mặt", "Xử lý", "Hoàn tất"];
+const progressSteps = ["Thông tin", "Nhận diện khuôn mặt", "Xử lý", "Hoàn tất"];
 
-export default function FaceRegistrationScreen({ videoRef, cameraStatus, cameraError, busy, captureFrame, onEnroll, onRetry, onGuest }: {
-  videoRef: Ref<HTMLVideoElement>; cameraStatus: CameraStatus; cameraError?: string | null; busy: boolean;
+export default function FaceRegistrationScreen({ videoRef, cameraStatus, cameraError, busy, qualityReady, captureFrame, onEnroll, onCancel }: {
+  videoRef: Ref<HTMLVideoElement>; cameraStatus: CameraStatus; cameraError?: string | null; busy: boolean; qualityReady?: boolean;
   captureFrame: () => Promise<Blob>; onEnroll: (fields: FaceRegistrationFields, image: Blob) => Promise<unknown>;
-  onRetry: () => void; onGuest: () => void;
+  onCancel: () => void;
 }) {
   const [step, setStep] = useState<WizardStep>("identity");
   const [fields, setFields] = useState<FaceRegistrationFields>({ full_name: "" });
+  const enrolling = useRef(false);
   const [error, setError] = useState("");
   const activeStep = step === "capture" ? 2 : step === "processing" ? 3 : 1;
   const update = (name: keyof FaceRegistrationFields, value: string) => setFields((current) => ({
@@ -26,11 +27,15 @@ export default function FaceRegistrationScreen({ videoRef, cameraStatus, cameraE
   }
 
   async function capture() {
-    if (busy || cameraStatus !== "READY") return;
+    if (enrolling.current || busy || cameraStatus !== "READY" || !qualityReady) return;
+    enrolling.current = true;
     setError(""); setStep("processing");
     try { await onEnroll(fields, await captureFrame()); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Không thể đăng ký khuôn mặt."); setStep("capture"); }
+    finally { enrolling.current = false; }
   }
+
+  useEffect(() => { if (step === "capture" && qualityReady && !error) void capture(); }, [step, qualityReady, error]);
 
   return <div className="registration-wizard">
     <ol className="wizard-progress" aria-label="Tiến trình đăng ký">{progressSteps.map((label, index) => <li key={label} className={index + 1 <= activeStep ? "active" : ""}><span>{index + 1}</span>{label}</li>)}</ol>
@@ -52,13 +57,13 @@ export default function FaceRegistrationScreen({ videoRef, cameraStatus, cameraE
         </>}
       </div>
       {error && <div className="registration-error" role="alert">{error}</div>}
-      <div className="registration-actions">{step === "academic" && <button type="button" className="kiosk-ghost" onClick={() => setStep("identity")}>Quay lại</button>}<button>Tiếp tục</button><button type="button" className="kiosk-ghost" onClick={onGuest}>Dùng tư cách khách</button></div>
+      <div className="registration-actions">{step === "academic" && <button type="button" className="kiosk-ghost" onClick={() => setStep("identity")}>Quay lại</button>}<button>Tiếp tục</button><button type="button" className="kiosk-ghost" onClick={onCancel}>Hủy đăng ký</button></div>
     </form> : null}
     {step === "capture" ? <div className="registration-capture-step">
       <div className="registration-camera"><CameraPreview videoRef={videoRef} status={cameraStatus} error={cameraError} showFrameOverlay/></div>
-      <div><span className="kiosk-kicker">BƯỚC 2 · CHỤP KHUÔN MẶT</span><h1>Nhìn thẳng vào camera</h1><p>Đứng một mình trong khung hình, bỏ khẩu trang nếu có và giữ yên khuôn mặt.</p>
+      <div><span className="kiosk-kicker">BƯỚC 2 · NHẬN DIỆN KHUÔN MẶT</span><h1>Nhìn thẳng vào camera</h1><p>Đứng một mình trong khung hình, bỏ khẩu trang nếu có và giữ yên khuôn mặt.</p>
         {error && <div className="registration-error" role="alert">{error}</div>}
-        <div className="registration-actions"><button disabled={busy || cameraStatus !== "READY"} onClick={() => void capture()}>Chụp khuôn mặt</button><button className="kiosk-ghost" onClick={() => setStep("academic")}>Sửa thông tin</button><button className="kiosk-ghost" onClick={onRetry}>Hủy đăng ký</button></div>
+        <div className="registration-actions"><span role="status">{qualityReady ? "Đang đăng ký tự động…" : "Nhìn thẳng và giữ yên để đăng ký"}</span><button className="kiosk-ghost" onClick={() => setStep("academic")}>Sửa thông tin</button><button className="kiosk-ghost" onClick={onCancel}>Hủy đăng ký</button></div>
       </div>
     </div> : null}
   </div>;

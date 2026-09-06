@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     voice_provider: str = "mock"
     ai_provider: str = "mock"
     kiosk_session_timeout_seconds: int = 60
+    kiosk_stream_origins: str = "http://localhost:5173,http://127.0.0.1:5173,null"
     face_confidence_threshold: float = 0.75
+    face_distance_threshold: float = 0.60
     max_image_upload_mb: int = 5
     max_audio_upload_mb: int = 15
 

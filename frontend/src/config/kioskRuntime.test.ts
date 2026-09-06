@@ -13,12 +13,12 @@ describe("production kiosk state machine", () => {
   });
 
   it("routes successful, unknown and registered faces to their dedicated experiences", () => {
-    const base = initialState();
+    const base = { ...initialState(), currentState: "FACE_TRACKING" as const };
     const success = { result: "SUCCESS", user: { id: "u1", student_code: "001", full_name: "Nguyễn Văn An" }, confidence_score: .94, next_state: "WELCOME" as const };
     const unknown = { result: "UNKNOWN_FACE", user: null, confidence_score: .2, next_state: "FACE_UNKNOWN" as const };
-    expect(reducer(base, { type: "FACE_VERIFY_SUCCESS", result: success }).currentState).toBe("FACE_SUCCESS");
+    expect(reducer(base, { type: "FACE_VERIFY_SUCCESS", result: success }).currentState).toBe("FACE_RECOGNIZED");
     expect(reducer(base, { type: "FACE_VERIFY_UNKNOWN", result: unknown }).currentState).toBe("UNKNOWN_FACE");
-    expect(reducer(base, { type: "FACE_ENROLL_SUCCESS", result: success }).currentState).toBe("REGISTER_SUCCESS");
+    expect(reducer({ ...base, currentState: "REGISTER_PROCESSING" }, { type: "FACE_ENROLL_SUCCESS", result: success }).currentState).toBe("REGISTER_SUCCESS");
   });
 
   it("prevents duplicate verification during a request and during cooldown", () => {
@@ -36,9 +36,8 @@ describe("production kiosk state machine", () => {
   });
 
   it("uses the required timing safeguards", () => {
-    expect(KIOSK_TIMING.countdownStepMs).toBe(500);
-    expect(KIOSK_TIMING.minimumVerificationMs).toBeGreaterThanOrEqual(800);
-    expect(KIOSK_TIMING.welcomeDisplayMs).toBe(3000);
+    expect(KIOSK_TIMING.presenceConfirmationMs).toBe(1200);
+    expect(KIOSK_TIMING.welcomeDisplayMs).toBe(2500);
     expect(KIOSK_TIMING.thankYouMs).toBe(3000);
   });
 
