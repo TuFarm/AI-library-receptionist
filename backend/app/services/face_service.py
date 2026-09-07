@@ -18,6 +18,16 @@ class FaceImageError(ValueError):
     pass
 
 
+class NoFaceDetectedError(FaceImageError):
+    pass
+
+
+class MultipleFacesDetectedError(FaceImageError):
+    def __init__(self, face_count: int):
+        super().__init__("Phát hiện nhiều khuôn mặt. Vui lòng chỉ để một người xuất hiện trong khung hình.")
+        self.face_count = face_count
+
+
 @dataclass
 class FaceEnrollmentResult:
     template_ref: str | None
@@ -56,9 +66,9 @@ def _extract_single_encoding(image_path: Path):
     image = face_recognition.load_image_file(str(image_path))
     locations = face_recognition.face_locations(image, model="hog")
     if not locations:
-        raise FaceImageError("Không phát hiện khuôn mặt trong ảnh. Vui lòng nhìn thẳng vào camera.")
-    if len(locations) != 1:
-        raise FaceImageError("Ảnh đăng ký phải có đúng một khuôn mặt.")
+        raise NoFaceDetectedError("Không phát hiện khuôn mặt trong ảnh. Vui lòng nhìn thẳng vào camera.")
+    if len(locations) > 1:
+        raise MultipleFacesDetectedError(len(locations))
     encodings = face_recognition.face_encodings(image, known_face_locations=locations)
     if len(encodings) != 1:
         raise FaceImageError("Không thể trích xuất đặc trưng khuôn mặt từ ảnh.")
@@ -66,9 +76,22 @@ def _extract_single_encoding(image_path: Path):
 
 
 class FaceService:
-    def enroll_face(self, user_id: UUID, image_path: Path) -> FaceEnrollmentResult:
+    def validate_enrollment_image(self, image_path: Path):
+        """Detect once before any user/profile mutation and return the gated encoding.
+
+        Mock has no detector and therefore cannot make a safe biometric enrollment
+        claim. It stays available for isolated service/UI tests only.
+        """
+        if settings.face_provider != "local":
+            raise FaceProviderUnavailable(
+                "FACE_PROVIDER=mock chỉ dành cho kiểm thử và không thể xác nhận danh tính thật. "
+                "Đăng ký Face ID an toàn yêu cầu FACE_PROVIDER=local hoặc provider thật."
+            )
+        return _extract_single_encoding(image_path)
+
+    def enroll_face(self, user_id: UUID, image_path: Path, validated_encoding=None) -> FaceEnrollmentResult:
         if settings.face_provider == "local":
-            encoding = _extract_single_encoding(image_path)
+            encoding = validated_encoding if validated_encoding is not None else _extract_single_encoding(image_path)
             serialized = json.dumps([float(value) for value in encoding]).encode("utf-8")
             return FaceEnrollmentResult(None, serialized, "face-recognition-hog-128d", 1.0)
         digest = sha256(image_path.read_bytes()).hexdigest()

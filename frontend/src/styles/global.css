@@ -99,3 +99,9 @@
 @keyframes assistant-listen { 50% { transform: scale(1.06); } }
 @keyframes assistant-greet { 50% { transform: translateY(-8px) rotate(3deg); } }
 @keyframes assistant-goodbye { 50% { transform: rotate(-4deg); opacity: .8; } }
+.registration-multiple-faces { background:#b91c2f!important; color:#fff!important; border:2px solid #ff8b98; font-weight:700; }
+.welcome-profile-form { width:min(760px,100%); max-height:62vh; overflow:auto; padding:22px; border:1px solid #ffffff20; border-radius:22px; background:#ffffff0b; text-align:left; }
+.welcome-profile-form h3 { margin:0; }
+.profile-actions { justify-content:center; }
+.kiosk-danger { background:#a72f42!important; color:#fff!important; }
+.profile-success { padding:10px 14px; border-radius:10px; background:#167653; color:#fff; }

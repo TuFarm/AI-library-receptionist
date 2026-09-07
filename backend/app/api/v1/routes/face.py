@@ -12,7 +12,10 @@ from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.responses import success_response
 from app.models.schema import Device, FaceAuthenticationLog, FaceProfile, User, UserSession
-from app.services.face_service import FaceImageError, FaceProviderUnavailable, FaceService
+from app.services.face_service import (
+    FaceImageError, FaceProviderUnavailable, FaceService,
+    MultipleFacesDetectedError, NoFaceDetectedError,
+)
 from app.services.interaction_service import record_event
 from app.services.media_storage_service import MediaStorageService, MediaValidationError
 from app.services.user_service import calculate_student_year
@@ -42,41 +45,60 @@ async def enroll(
     device_code: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ) -> dict:
-    session = db.get(UserSession, session_id) if session_id else None
-    if session_id and session is None:
-        raise AppError(404, "SESSION_NOT_FOUND", "Không tìm thấy phiên kiosk.")
-    device = db.get(Device, device_id) if device_id else None
-    if device is None and device_code:
-        device = db.scalar(select(Device).where(Device.device_code == device_code))
-
-    user = db.get(User, user_id) if user_id else None
-    if user_id and user is None:
-        raise AppError(404, "USER_NOT_FOUND", "Không tìm thấy người dùng.")
-    if user is None and student_code:
-        user = db.scalar(select(User).where(User.student_code == student_code, User.deleted_at.is_(None)))
-    if user is None and email:
-        user = db.scalar(select(User).where(User.email == email, User.deleted_at.is_(None)))
-    if user is None:
-        if not full_name or not full_name.strip():
-            raise AppError(422, "FULL_NAME_REQUIRED", "Vui lòng nhập họ và tên để đăng ký khuôn mặt.")
-        user = User(full_name=full_name.strip(), student_code=student_code or None, email=email or None,
-            phone=phone or None, faculty=faculty or None, major=major or None, admission_year=admission_year,
-            user_type="STUDENT", account_status="ACTIVE", preferred_language="vi")
-        db.add(user)
-        db.flush()
-    else:
-        if full_name: user.full_name = full_name.strip()
-        if student_code: user.student_code = student_code
-        if email: user.email = email
-        if phone: user.phone = phone
-        if faculty: user.faculty = faculty
-        if major: user.major = major
-        if admission_year is not None: user.admission_year = admission_year
-
     storage = MediaStorageService()
     try:
         path = await storage.save_image(image_file, "enrollments")
-        result = FaceService().enroll_face(user.id, path)
+        face_service = FaceService()
+        # This must complete before looking up, creating, or mutating a User.
+        validated_encoding = face_service.validate_enrollment_image(path)
+    except MediaValidationError as exc:
+        raise AppError(400, "INVALID_IMAGE", str(exc)) from exc
+    except MultipleFacesDetectedError as exc:
+        storage.cleanup(path)
+        raise AppError(422, "MULTIPLE_FACES_DETECTED", str(exc), {"face_count": exc.face_count}) from exc
+    except NoFaceDetectedError as exc:
+        storage.cleanup(path)
+        raise AppError(422, "NO_FACE_DETECTED", str(exc)) from exc
+    except FaceImageError as exc:
+        storage.cleanup(path)
+        raise AppError(422, "FACE_IMAGE_INVALID", str(exc)) from exc
+    except FaceProviderUnavailable as exc:
+        storage.cleanup(path)
+        raise AppError(503, "FACE_PROVIDER_UNAVAILABLE", str(exc)) from exc
+
+    try:
+        session = db.get(UserSession, session_id) if session_id else None
+        if session_id and session is None:
+            raise AppError(404, "SESSION_NOT_FOUND", "Không tìm thấy phiên kiosk.")
+        device = db.get(Device, device_id) if device_id else None
+        if device is None and device_code:
+            device = db.scalar(select(Device).where(Device.device_code == device_code))
+
+        user = db.get(User, user_id) if user_id else None
+        if user_id and user is None:
+            raise AppError(404, "USER_NOT_FOUND", "Không tìm thấy người dùng.")
+        if user is None and student_code:
+            user = db.scalar(select(User).where(User.student_code == student_code, User.deleted_at.is_(None)))
+        if user is None and email:
+            user = db.scalar(select(User).where(User.email == email, User.deleted_at.is_(None)))
+        if user is None:
+            if not full_name or not full_name.strip():
+                raise AppError(422, "FULL_NAME_REQUIRED", "Vui lòng nhập họ và tên để đăng ký khuôn mặt.")
+            user = User(full_name=full_name.strip(), student_code=student_code or None, email=email or None,
+                phone=phone or None, faculty=faculty or None, major=major or None, admission_year=admission_year,
+                user_type="STUDENT", account_status="ACTIVE", preferred_language="vi")
+            db.add(user)
+            db.flush()
+        else:
+            if full_name: user.full_name = full_name.strip()
+            if student_code: user.student_code = student_code
+            if email: user.email = email
+            if phone: user.phone = phone
+            if faculty: user.faculty = faculty
+            if major: user.major = major
+            if admission_year is not None: user.admission_year = admission_year
+
+        result = face_service.enroll_face(user.id, path, validated_encoding=validated_encoding)
         profile = db.scalar(select(FaceProfile).where(
             FaceProfile.user_id == user.id, FaceProfile.active.is_(True), FaceProfile.deleted_at.is_(None)))
         if profile is None:
@@ -98,11 +120,23 @@ async def enroll(
             "user": _user_data(user), "provider": settings.face_provider, "quality_score": result.quality_score,
             "next_state": "WELCOME"}, "Đăng ký khuôn mặt thành công.")
     except MediaValidationError as exc:
+        db.rollback()
         raise AppError(400, "INVALID_IMAGE", str(exc)) from exc
+    except MultipleFacesDetectedError as exc:
+        db.rollback()
+        raise AppError(422, "MULTIPLE_FACES_DETECTED", str(exc), {"face_count": exc.face_count}) from exc
+    except NoFaceDetectedError as exc:
+        db.rollback()
+        raise AppError(422, "NO_FACE_DETECTED", str(exc)) from exc
     except FaceImageError as exc:
+        db.rollback()
         raise AppError(422, "FACE_IMAGE_INVALID", str(exc)) from exc
     except FaceProviderUnavailable as exc:
+        db.rollback()
         raise AppError(503, "FACE_PROVIDER_UNAVAILABLE", str(exc)) from exc
+    except Exception:
+        db.rollback()
+        raise
     finally:
         if "path" in locals():
             storage.cleanup(path)

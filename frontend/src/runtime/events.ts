@@ -4,6 +4,7 @@ export const RuntimeEvent = {
   faceDetected: "face_detected", faceTracking: "face_tracking",
   trackCreated: "track_created", trackUpdated: "track_updated", trackLost: "track_lost",
   faceQualityGood: "face_quality_good", faceQualityBad: "face_quality_bad",
+  multipleFacesDetected: "multiple_faces_detected",
   recognitionStarted: "recognition_started", recognitionProgress: "recognition_progress", recognitionFinished: "recognition_finished",
   identityCandidate: "identity_candidate", identityConfirmed: "identity_confirmed",
   identityUnknown: "identity_unknown", registrationRequested: "registration_requested",

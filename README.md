@@ -102,6 +102,14 @@ Knowledge chunks, selected conversation context, feedback, prompt versions, and 
 
 Vision quality thresholds are engineering defaults, not calibrated biometric guarantees: HOG detection, IoU tracking, single-face/size/light/blur/eye/pose/stability checks, 500 ms recognition cadence, then three-vote confirmation. Tune only with consented representative testing.
 
+Enrollment requires exactly one face to pass every quality gate for both
+`REGISTRATION_STABLE_FRAMES` frames (default `5`) and
+`REGISTRATION_STABLE_MS` milliseconds (default `700`). Zero, multiple, low-quality,
+track-change, reconnect, or session-change observations reset all enrollment evidence.
+`FACE_PROVIDER=mock` is test-only: it has no real detector/identity capability, cannot
+prove that two people were identified correctly, and is rejected by the safe REST
+enrollment path. Biometric end-to-end identity tests must use `local` or a real provider.
+
 ## Local development
 
 Prerequisites: Docker Desktop, Python 3.12 recommended for optional local face support, Node.js/npm, browser camera/microphone access.
@@ -132,6 +140,8 @@ Visit `http://localhost:5173/kiosk/fullscreen` or `/admin/dashboard`. Inside `fr
 DATABASE_URL=postgresql+psycopg://ai_library:ai_library_dev@localhost:5432/ai_library
 REDIS_URL=redis://localhost:6379/0
 FACE_PROVIDER=mock
+REGISTRATION_STABLE_FRAMES=5
+REGISTRATION_STABLE_MS=700
 VOICE_PROVIDER=mock
 AI_PROVIDER=mock
 # AI_PROVIDER=gemini

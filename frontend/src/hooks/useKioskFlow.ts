@@ -4,7 +4,7 @@ import { kioskStream } from "../runtime/stream";
 import { RuntimeEvent as Events } from "../runtime/events";
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { KIOSK_TIMING } from "../config/kioskRuntime";
-import { conversationApi, faceApi, kioskApi, MOCK_FALLBACK_ENABLED } from "../services/apiClient";
+import { conversationApi, faceApi, kioskApi, MOCK_FALLBACK_ENABLED, userApi } from "../services/apiClient";
 import type { CameraStatus, FaceRegistrationFields, FaceVerifyResult, KioskAction, KioskConversation, KioskFlowState, KioskMessage, KioskState, MessageInputMethod, MicStatus } from "../types/kiosk";
 
 const DEVICE_CODE = String(import.meta.env.VITE_KIOSK_DEVICE_CODE ?? "KIOSK_DEV_01");
@@ -30,6 +30,7 @@ export function reducer(state: KioskFlowState, action: KioskAction): KioskFlowSt
     case "FACE_VERIFY_UNKNOWN": return { ...state, lastFaceResult: action.result, user: null, currentState: "UNKNOWN_FACE", isProcessing: false, ...active };
     case "FACE_VERIFY_FAILED": return { ...state, error: action.error, currentState: "UNKNOWN_FACE", isProcessing: false, ...active };
     case "FACE_ENROLL_SUCCESS": if (state.currentState !== "REGISTER_PROCESSING") return state; return { ...state, lastFaceResult: action.result, user: action.result.user, currentState: "REGISTER_SUCCESS", isProcessing: false, ...active };
+    case "USER_PROFILE_UPDATED": return { ...state, user: action.user, ...active };
     case "START_CONVERSATION": {
       const greeting: KioskMessage = { id: crypto.randomUUID(), role: "assistant", text: state.user
         ? `Xin chào ${state.user.full_name}! Hôm nay tôi có thể giúp gì cho bạn?`
@@ -117,7 +118,7 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
     try {
       const current = stateRef.current;
       const enrolled = await faceApi.enrollFace({
-        sessionId: current.session?.session_id, deviceCode: current.device.code, imageBlob, fields,
+        sessionId: current.session?.session_id, userId: current.user?.id, deviceCode: current.device.code, imageBlob, fields,
       });
       const result: FaceVerifyResult = {
         result: "SUCCESS", user: enrolled.user, confidence_score: enrolled.quality_score, next_state: "WELCOME",
@@ -135,6 +136,18 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
   const logEvent = useCallback((event_type: string, content_summary?: string) => {
     const sessionId = stateRef.current.session?.session_id;
     if (sessionId) void kioskApi.logEvent(sessionId, { event_type, content_summary }).catch(() => undefined);
+  }, []);
+  const updateProfile = useCallback(async (fields: FaceRegistrationFields) => {
+    const user = stateRef.current.user;
+    if (!user) throw new Error("Không tìm thấy hồ sơ người dùng.");
+    const updated = await userApi.update(user.id, fields);
+    dispatch({ type: "USER_PROFILE_UPDATED", user: updated });
+    return updated;
+  }, []);
+  const deleteFaceId = useCallback(async () => {
+    const user = stateRef.current.user;
+    if (!user) throw new Error("Không tìm thấy hồ sơ người dùng.");
+    return userApi.deleteFaceId(user.id);
   }, []);
   const startConversation = useCallback(async (): Promise<KioskConversation | null> => {
     const currentEpoch = epoch.current;
@@ -243,6 +256,6 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
   }, [state.currentState]);
 
   return { ...state, dispatch, startSession, cameraGranted, cameraDenied, setCameraStatus, startFaceScan,
-    enrollFace, startConversation, submitMessage, setMicStatus, openBooks, openSurvey,
+    enrollFace, updateProfile, deleteFaceId, startConversation, submitMessage, setMicStatus, openBooks, openSurvey,
     completeSurvey, transitionTo, touch, resetToIdle };
 }

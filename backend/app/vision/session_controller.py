@@ -20,6 +20,11 @@ class SessionController:
         self.proposal = result
         self.locked = True
 
+    def clear_evidence(self):
+        self.proposal = None
+        if self.mode != "conversation":
+            self.locked = False
+
     def accept(self, session_id):
         if self.mode != "recognition" or session_id != self.session_id or self.proposal is None:
             return None

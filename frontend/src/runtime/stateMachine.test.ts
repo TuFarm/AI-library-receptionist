@@ -7,6 +7,7 @@ describe("kiosk lifecycle", () => {
   it("rejects recognition reentry from a conversation", () => {
     expect(canTransition("AI_SPEAKING", "FACE_TRACKING")).toBe(false);
     expect(canTransition("WELCOME", "CAMERA_PREPARING")).toBe(false);
+    expect(canTransition("WELCOME", "REGISTER")).toBe(true);
     expect(canTransition("REGISTER_PROCESSING", "UNKNOWN_FACE")).toBe(false);
     expect(canTransition("AI_SPEAKING", "VOICE_LISTENING")).toBe(true);
   });

@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     kiosk_stream_origins: str = "http://localhost:5173,http://127.0.0.1:5173,null"
     face_confidence_threshold: float = 0.75
     face_distance_threshold: float = 0.60
+    registration_stable_frames: int = 5
+    registration_stable_ms: int = 700
     max_image_upload_mb: int = 5
     max_audio_upload_mb: int = 15
 

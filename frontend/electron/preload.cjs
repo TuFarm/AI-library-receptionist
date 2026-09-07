@@ -1,8 +1,10 @@
 const { contextBridge, ipcRenderer } = require("electron");
 const api = {
   getAppVersion: () => ipcRenderer.invoke("kiosk:get-app-version"),
-  getDiagnostics: () => ipcRenderer.invoke("kiosk:get-diagnostics"),
 };
+if (process.argv.includes("--kiosk-development")) {
+  api.getDiagnostics = () => ipcRenderer.invoke("kiosk:get-diagnostics");
+}
 // Enable only after wiring a physical presence sensor in the main process.
 if (process.argv.includes("--kiosk-external-presence")) {
   api.onPresence = (listener) => {

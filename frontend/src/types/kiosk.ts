@@ -52,6 +52,7 @@ export type KioskAction =
   | { type: "START_FACE_SCAN" } | { type: "FACE_VERIFY_SUCCESS"; result: FaceVerifyResult }
   | { type: "FACE_VERIFY_UNKNOWN"; result: FaceVerifyResult } | { type: "FACE_VERIFY_FAILED"; error: string }
   | { type: "FACE_ENROLL_SUCCESS"; result: FaceVerifyResult }
+  | { type: "USER_PROFILE_UPDATED"; user: KioskUser }
   | { type: "START_CONVERSATION"; conversation: KioskConversation }
   | { type: "USER_MESSAGE_SUBMITTED"; message: KioskMessage }
   | { type: "AI_RESPONSE_RECEIVED"; message: KioskMessage; mockFallback?: boolean }

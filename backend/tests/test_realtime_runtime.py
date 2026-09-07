@@ -7,6 +7,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.main import app
 from app.api.v1.routes import runtime
+from app.api.v1.routes.runtime import RegistrationStabilityGate
 from app.services.realtime_face_service import RealtimeFaceService, Track, overlap
 from app.vision.engine import VisionEngine
 from app.vision.presence_detector import PresenceDetector
@@ -64,6 +65,18 @@ def test_presence_and_session_controllers_reset_connection_evidence():
     controller.offer(candidate)
     assert controller.accept("other-session") is None
     assert controller.accept("session-1") is candidate
+
+
+def test_registration_stability_resets_when_another_face_appears(monkeypatch):
+    monkeypatch.setattr(runtime.settings, "registration_stable_frames", 3)
+    monkeypatch.setattr(runtime.settings, "registration_stable_ms", 500)
+    gate = RegistrationStabilityGate()
+    assert not gate.observe(1, 1.0)
+    assert not gate.observe(1, 1.3)
+    gate.reset()  # zero/multiple faces invalidate all accumulated evidence
+    assert not gate.observe(1, 2.0)
+    assert not gate.observe(1, 2.3)
+    assert gate.observe(1, 2.6)
 
 
 def test_crossing_and_multiple_faces_do_not_share_tracks():
@@ -132,3 +145,26 @@ def test_stream_recovers_from_invalid_frame_without_committing(monkeypatch):
         assert [event["event"] for event in events] == ["stream_error", "frame_ready"]
         socket.send_json({"event": "PING", "payload": {"sent_at": 42}})
         assert socket.receive_json()["payload"]["sent_at"] == 42
+
+
+def test_registration_stream_emits_multiple_face_lock_without_quality_good(monkeypatch):
+    def inspect(self, _data):
+        for track_id in (1, 2):
+            self.tracks.setdefault(track_id, Track(track_id, (0, 100, 100, 0), 0, 0))
+        faces = [{"track_id": track_id, "quality_ok": True, "box": [0, 100, 100, 0], "guidance": None}
+                 for track_id in (1, 2)]
+        return None, faces
+    monkeypatch.setattr(VisionEngine, "inspect", inspect)
+    with TestClient(app) as client, client.websocket_connect(
+        "/api/v1/kiosk/stream", headers={"origin": "http://localhost:5173"}
+    ) as socket:
+        socket.receive_json()
+        socket.send_json({"event": "CONFIGURE", "payload": {"mode": "registration", "session_id": "session-b"}})
+        read_until(socket, "session_state")
+        socket.send_bytes(b"frame")
+        events = read_until(socket, "frame_ready")
+        multiple = next(event for event in events if event["event"] == "multiple_faces_detected")
+        assert multiple["payload"]["face_count"] == 2
+        assert multiple["payload"]["session_id"] == "session-b"
+        assert "embedding" not in multiple["payload"]
+        assert not any(event["event"] == "face_quality_good" for event in events)

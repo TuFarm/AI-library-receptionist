@@ -1,4 +1,4 @@
-import type { ActiveSurvey, BookCategory, FaceEnrollmentResult, FaceRegistrationFields, KioskConversation, KioskMessage, KioskSession, SuggestedBook } from "../types/kiosk";
+import type { ActiveSurvey, BookCategory, FaceEnrollmentResult, FaceRegistrationFields, KioskConversation, KioskMessage, KioskSession, KioskUser, SuggestedBook } from "../types/kiosk";
 
 type ApiEnvelope<T> = { success: boolean; message: string; data: T; error?: { code: string; details?: unknown } };
 const configuredBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "http://localhost:8000";
@@ -21,6 +21,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export const apiClient = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, data: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(data) }),
+  patch: <T>(path: string, data: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(data) }),
+  delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
   postForm: <T>(path: string, data: FormData) => request<T>(path, { method: "POST", body: data }),
 };
 export const kioskApi = {
@@ -29,11 +31,12 @@ export const kioskApi = {
   logEvent: (sessionId: string, event: { event_type: string; input_method?: string; content_summary?: string; success?: boolean }) => apiClient.post<{ event_id: string }>(`/kiosk/sessions/${sessionId}/events`, event),
 };
 export const faceApi = {
-  enrollFace: ({ sessionId, deviceCode, imageBlob, fields }: {
-    sessionId?: string; deviceCode: string; imageBlob: Blob; fields: FaceRegistrationFields;
+  enrollFace: ({ sessionId, userId, deviceCode, imageBlob, fields }: {
+    sessionId?: string; userId?: string; deviceCode: string; imageBlob: Blob; fields: FaceRegistrationFields;
   }) => {
     const form = new FormData();
     if (sessionId) form.append("session_id", sessionId);
+    if (userId) form.append("user_id", userId);
     form.append("device_code", deviceCode);
     form.append("image_file", imageBlob, "kiosk-enrollment.jpg");
     Object.entries(fields).forEach(([key, value]) => {
@@ -41,6 +44,10 @@ export const faceApi = {
     });
     return apiClient.postForm<FaceEnrollmentResult>("/face/enroll", form);
   },
+};
+export const userApi = {
+  update: (userId: string, fields: FaceRegistrationFields) => apiClient.patch<KioskUser>(`/users/${userId}`, fields),
+  deleteFaceId: (userId: string) => apiClient.delete<{ user_id: string; deleted_profiles: number }>(`/users/${userId}/face-profile`),
 };
 export const voiceApi = {
   sendBrowserTranscript: (payload: { session_id?: string; conversation_id: string; transcript: string; confidence_score?: number }) => apiClient.post<{ message_id: string; transcript: string; provider: string }>("/voice/browser-transcript", payload),
@@ -63,5 +70,5 @@ export const surveyApi = {
 };
 export const adminApi = {
   getDashboard: () => apiClient.get<Record<string, unknown>>("/admin/dashboard/mock"),
-  getStatus: () => apiClient.get<Record<string, unknown>>("/admin/status"),
+  getStatus: () => apiClient.get<Array<{ module: string; status: string; warning?: string | null }>>("/admin/status"),
 };

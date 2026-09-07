@@ -5,6 +5,7 @@ import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from time import monotonic
+from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -29,6 +30,26 @@ from app.vision.session_controller import SessionController
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+MULTIPLE_FACES_GUIDANCE = "Phát hiện nhiều khuôn mặt. Vui lòng chỉ để một người xuất hiện trong khung hình."
+
+
+@dataclass
+class RegistrationStabilityGate:
+    track_id: int | None = None
+    frames: int = 0
+    since: float | None = None
+
+    def reset(self):
+        self.track_id, self.frames, self.since = None, 0, None
+
+    def observe(self, track_id: int, now: float) -> bool:
+        if self.track_id != track_id:
+            self.track_id, self.frames, self.since = track_id, 0, now
+        self.frames += 1
+        return (self.frames >= settings.registration_stable_frames
+                and self.since is not None
+                and (now - self.since) * 1000 >= settings.registration_stable_ms)
 
 
 def load_candidates():
@@ -88,6 +109,7 @@ async def stream(socket: WebSocket):
     completed_requests = {}
     candidates = None
     publisher = EventPublisher(socket)
+    registration_gate = RegistrationStabilityGate()
 
     await publisher.publish("stream_ready")
     try:
@@ -110,6 +132,16 @@ async def stream(socket: WebSocket):
                                                                "metrics": vision.metrics})
                     for lifecycle in vision.tracker.last_events:
                         await publisher.publish(lifecycle["event"], {key: value for key, value in lifecycle.items() if key != "event"})
+                    if controller.mode == "registration" and len(detections) != 1:
+                        registration_gate.reset()
+                        controller.clear_evidence()
+                        for track in vision.tracks.values():
+                            track.reset()
+                        if len(detections) >= 2:
+                            await publisher.publish("multiple_faces_detected", {
+                                "face_count": len(detections), "guidance": MULTIPLE_FACES_GUIDANCE,
+                                "session_id": controller.session_id,
+                            })
                     if not detections:
                         _, lost = presence.update(False, started)
                         if lost:
@@ -120,10 +152,25 @@ async def stream(socket: WebSocket):
                         if controller.mode == "idle" and confirmed_presence:
                             await publisher.publish("presence_detected")
                         if controller.mode in {"recognition", "registration"}:
+                            if controller.mode == "registration" and len(detections) != 1:
+                                continue
                             for detection in detections:
                                 track = vision.tracks[detection["track_id"]]
                                 if not detection["quality_ok"]:
+                                    if controller.mode == "registration":
+                                        registration_gate.reset()
+                                        controller.clear_evidence()
                                     await publisher.publish("face_quality_bad", detection)
+                                    continue
+                                if controller.mode == "registration":
+                                    registration_now = monotonic()
+                                    if not registration_gate.observe(track.id, registration_now):
+                                        continue
+                                    await publisher.publish("face_quality_good", {
+                                        **detection, "session_id": controller.session_id,
+                                        "stable_frames": registration_gate.frames,
+                                        "stable_ms": round((registration_now - (registration_gate.since or registration_now)) * 1000),
+                                    })
                                     continue
                                 await publisher.publish("face_quality_good", detection)
                                 recognition_now = monotonic()
@@ -174,6 +221,7 @@ async def stream(socket: WebSocket):
             if kind == "CONFIGURE":
                 next_mode = payload.get("mode", "idle")
                 controller.configure(next_mode, payload.get("session_id"))
+                registration_gate.reset()
                 vision = VisionEngine()
                 recognition = RecognitionService()
                 candidates = None

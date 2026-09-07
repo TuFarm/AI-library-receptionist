@@ -12,6 +12,7 @@ import KioskVoiceChatScreen from "./KioskVoiceChatScreen";
 import WelcomeScreen from "./WelcomeScreen";
 import { kioskEvents } from "../../runtime/eventBus";
 import { RuntimeEvent as Events } from "../../runtime/events";
+import { isDeveloperControlsEnabled } from "../../config/developerControls";
 
 const VOICE = new Set(["AI_GREETING", "VOICE_LISTENING", "USER_SPEAKING", "PROCESSING", "AI_SPEAKING", "LISTENING"]);
 const RECOGNITION = new Set(["CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING", "UNKNOWN_FACE"]);
@@ -23,9 +24,13 @@ export default function KioskApp() {
   let content;
   if (VOICE.has(state)) content = <KioskVoiceChatScreen flow={flow}/>;
   else if (state === "REGISTER" || state === "REGISTER_PROCESSING") content = <FaceRegistrationScreen videoRef={camera.videoRef} cameraStatus={camera.cameraStatus}
-    cameraError={camera.error} busy={flow.isProcessing} captureFrame={sensor.captureEnrollmentFrame} qualityReady={sensor.qualityReady} onEnroll={flow.enrollFace}
+    cameraError={camera.error} busy={flow.isProcessing} captureFrame={sensor.captureEnrollmentFrame} qualityReady={sensor.qualityReady}
+    faceCount={sensor.faceCount} multipleFacesDetected={sensor.multipleFacesDetected} onEnroll={flow.enrollFace}
     onCancel={() => kioskEvents.publish(Events.identityUnknown)}/>;
-  else if (state === "WELCOME") content = <WelcomeScreen user={flow.user} frozenFrameUrl={sensor.frozenFrameUrl} onContinue={() => void flow.startConversation()}/>;
+  else if (state === "WELCOME") content = <WelcomeScreen user={flow.user} frozenFrameUrl={sensor.frozenFrameUrl}
+    onContinue={() => void flow.startConversation()} onSave={flow.updateProfile}
+    onReregister={() => flow.transitionTo("REGISTER")}
+    onDeleteFaceId={async () => { await flow.deleteFaceId(); await flow.resetToIdle("FACE_ID_DELETED"); }}/>;
   else if (state === "SURVEY") content = <KioskSurveyScreen sessionId={flow.session?.session_id} userId={flow.user?.id} onComplete={flow.completeSurvey}/>;
   else if (state === "THANK_YOU") content = <KioskThankYouScreen onHome={() => flow.transitionTo("RETURN_IDLE")}/>;
   else if (RECOGNITION.has(state)) content = <div className={`recognition-stage ${state === "UNKNOWN_FACE" ? "unknown" : ""}`}>
@@ -55,6 +60,6 @@ export default function KioskApp() {
   </div>;
   return <KioskChrome state={state} onExit={state !== "IDLE" ? () => flow.transitionTo("SURVEY") : undefined}>
     {content}
-    {import.meta.env.DEV && import.meta.env.VITE_ENABLE_DEV_CONTROLS === "true" && <details className="kiosk-dev-panel"><summary>Runtime diagnostics</summary><pre>{JSON.stringify({ state, camera: camera.cameraStatus, presence: sensor.externalPresence ? "external sensor" : "not connected", ...sensor.diagnostics }, null, 2)}</pre><button onClick={() => void flow.startSession()}>Simulate presence</button></details>}
+    {isDeveloperControlsEnabled && <details className="kiosk-dev-panel"><summary>Runtime diagnostics</summary><pre>{JSON.stringify({ state, camera: camera.cameraStatus, presence: sensor.externalPresence ? "external sensor" : "not connected", ...sensor.diagnostics }, null, 2)}</pre><button onClick={() => void flow.startSession()}>Simulate presence</button></details>}
   </KioskChrome>;
 }
