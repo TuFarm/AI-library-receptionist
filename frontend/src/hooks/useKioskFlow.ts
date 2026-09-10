@@ -84,6 +84,7 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
   const sessionStarting = useRef(false);
   const epoch = useRef(0);
   const turnInFlight = useRef(false);
+  const conversationStarting = useRef(false);
   const startSession = useCallback(async () => {
     if (sessionStarting.current || stateRef.current.currentState !== "IDLE") return false;
     const currentEpoch = epoch.current;
@@ -157,6 +158,8 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
       dispatch({ type: "TRANSITION", state: "VOICE_LISTENING" });
       return stateRef.current.conversation;
     }
+    if (conversationStarting.current) return null;
+    conversationStarting.current = true;
     dispatch({ type: "SET_PROCESSING", value: true });
     try {
       const current = stateRef.current;
@@ -176,6 +179,7 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
       dispatch({ type: "SET_ERROR", error: reason instanceof Error ? reason.message : "Không thể bắt đầu hội thoại." });
       return null;
     }
+    finally { conversationStarting.current = false; }
   }, []);
 
   const submitMessage = useCallback(async (text: string, inputMethod: MessageInputMethod = "TEXT", confidence?: number): Promise<string | null> => {

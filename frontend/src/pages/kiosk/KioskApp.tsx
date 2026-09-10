@@ -26,11 +26,12 @@ export default function KioskApp() {
   else if (state === "REGISTER" || state === "REGISTER_PROCESSING") content = <FaceRegistrationScreen videoRef={camera.videoRef} cameraStatus={camera.cameraStatus}
     cameraError={camera.error} busy={flow.isProcessing} captureFrame={sensor.captureEnrollmentFrame} qualityReady={sensor.qualityReady}
     faceCount={sensor.faceCount} faceGuideRects={sensor.faceGuideRects} multipleFacesDetected={sensor.multipleFacesDetected} onEnroll={flow.enrollFace}
+    existingUser={flow.user}
     capturePrepared={sensor.capturePrepared} captureCountdown={sensor.captureCountdown}
     onCaptureStart={sensor.beginEnrollmentCapture} onCaptureEnd={sensor.endEnrollmentCapture}
-    onCancel={() => flow.transitionTo("UNKNOWN_FACE")}/>;
+    onCancel={() => flow.transitionTo(flow.user ? "WELCOME" : "UNKNOWN_FACE")}/>;
   else if (state === "REGISTER_SUCCESS") content = <EnrollmentSuccessScreen user={flow.user} welcomeContext={flow.welcomeContext}
-    onComplete={() => flow.transitionTo("WELCOME")}/>;
+    onComplete={() => void flow.startConversation()}/>;
   else if (state === "WELCOME") content = <WelcomeScreen user={flow.user} welcomeContext={flow.welcomeContext}
     announce={flow.welcomeContext === "returning"} frozenFrameUrl={sensor.frozenFrameUrl}
     onContinue={() => void flow.startConversation()} onSave={flow.updateProfile}

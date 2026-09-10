@@ -4,7 +4,7 @@ import { CameraPreview } from "../../components/kiosk/CameraPreview";
 import { initialState, reducer } from "../../hooks/useKioskFlow";
 import type { KioskUser } from "../../types/kiosk";
 import EnrollmentSuccessScreen from "./EnrollmentSuccessScreen";
-import FaceRegistrationScreen from "./FaceRegistrationScreen";
+import FaceRegistrationScreen, { registrationFieldsForUser } from "./FaceRegistrationScreen";
 import { isRecognitionState, RecognitionScreen } from "./RecognitionScreen";
 import { welcomeMessage } from "./WelcomeScreen";
 
@@ -58,6 +58,21 @@ describe("kiosk recognition and welcome UI", () => {
     expect(success).toContain("lần đầu tiên đến với Trợ lý Thư viện AI");
   });
 
+  it("re-enrollment keeps the current profile and opens directly on face capture", () => {
+    const profile = { ...user, email: "an@example.test", faculty: "CNTT", admission_year: 2024 };
+    expect(registrationFieldsForUser(profile)).toEqual({
+      full_name: "Nguyễn Văn An", student_code: "001", email: "an@example.test",
+      phone: undefined, faculty: "CNTT", major: undefined, admission_year: 2024,
+    });
+    const html = renderToStaticMarkup(<FaceRegistrationScreen existingUser={profile} videoRef={noRef}
+      cameraStatus="READY" busy={false} captureFrame={async () => new Blob()}
+      onCaptureStart={noRef} onCaptureEnd={noRef} onEnroll={async () => undefined} onCancel={noRef}/>);
+    expect(html).toContain("ĐĂNG KÝ LẠI FACE ID");
+    expect(html).toContain("Thông tin hồ sơ hiện tại sẽ được giữ nguyên");
+    expect(html).not.toContain("Cho chúng tôi biết về bạn");
+    expect(html).not.toContain("Sửa thông tin");
+  });
+
   it("keeps welcome context in the existing reducer state machine", () => {
     const result = { result: "SUCCESS", user, confidence_score: .9, next_state: "WELCOME" as const };
     const returning = reducer({ ...initialState(), currentState: "IDENTITY_CONFIRMING" }, { type: "FACE_VERIFY_SUCCESS", result });
@@ -65,5 +80,7 @@ describe("kiosk recognition and welcome UI", () => {
     const reenrolled = reducer({ ...returning, currentState: "REGISTER_PROCESSING" },
       { type: "FACE_ENROLL_SUCCESS", result, welcomeContext: "reenrollment" });
     expect(reenrolled.welcomeContext).toBe("reenrollment");
+    const conversation = reducer(reenrolled, { type: "START_CONVERSATION", conversation: { conversation_id: "c1", status: "active" } });
+    expect(conversation.currentState).toBe("AI_GREETING");
   });
 });

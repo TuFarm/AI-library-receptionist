@@ -9,14 +9,14 @@ export default function EnrollmentSuccessScreen({ user, welcomeContext, onComple
   user: KioskUser | null; welcomeContext: WelcomeContext | null; onComplete: () => void;
 }) {
   const tts = useTextToSpeech();
-  const spoken = useRef(false);
+  const completeRef = useRef(onComplete);
+  completeRef.current = onComplete;
   const message = welcomeMessage(user, welcomeContext);
   useEffect(() => {
-    if (spoken.current) return;
-    spoken.current = true;
     let active = true;
-    void Promise.all([tts.speak(message), wait(KIOSK_TIMING.registrationSuccessMs)]).then(() => {
-      if (active) onComplete();
+    const speech = Promise.race([tts.speak(message), wait(KIOSK_TIMING.registrationSpeechMaxMs)]);
+    void Promise.all([speech, wait(KIOSK_TIMING.registrationSuccessMs)]).then(() => {
+      if (active) completeRef.current();
     });
     return () => { active = false; tts.stop(); };
   }, [message]);

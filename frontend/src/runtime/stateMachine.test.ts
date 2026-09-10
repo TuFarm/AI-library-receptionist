@@ -8,6 +8,8 @@ describe("kiosk lifecycle", () => {
     expect(canTransition("AI_SPEAKING", "FACE_TRACKING")).toBe(false);
     expect(canTransition("WELCOME", "CAMERA_PREPARING")).toBe(false);
     expect(canTransition("WELCOME", "REGISTER")).toBe(true);
+    expect(canTransition("REGISTER", "WELCOME")).toBe(true);
+    expect(canTransition("REGISTER_SUCCESS", "AI_GREETING")).toBe(true);
     expect(canTransition("REGISTER_PROCESSING", "UNKNOWN_FACE")).toBe(false);
     expect(canTransition("AI_SPEAKING", "VOICE_LISTENING")).toBe(true);
   });

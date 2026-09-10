@@ -26,6 +26,7 @@ export const KIOSK_TIMING = {
   welcomeDisplayMs: 2500,
   postSpeechSilenceMs: 500,
   registrationSuccessMs: 2200,
+  registrationSpeechMaxMs: 8000,
   thankYouMs: 3000,
   returnIdleMs: 500,
   transitionMs: 420,

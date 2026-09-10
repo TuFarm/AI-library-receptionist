@@ -1,25 +1,38 @@
 import { useEffect, useRef, useState, type FormEvent, type Ref } from "react";
 import { CountdownAnimation, ScanningAnimation } from "../../components/kiosk/KioskAnimations";
 import { CameraPreview } from "../../components/kiosk/CameraPreview";
-import type { CameraStatus, FaceGuideRect, FaceRegistrationFields } from "../../types/kiosk";
+import type { CameraStatus, FaceGuideRect, FaceRegistrationFields, KioskUser } from "../../types/kiosk";
 
 type WizardStep = "identity" | "academic" | "capture" | "processing";
-const progressSteps = ["Thông tin", "Nhận diện khuôn mặt", "Xử lý", "Hoàn tất"];
+const newUserProgress = ["Thông tin", "Nhận diện khuôn mặt", "Xử lý", "Hoàn tất"];
+const reenrollmentProgress = ["Nhận diện khuôn mặt", "Xử lý", "Hoàn tất"];
+
+export function registrationFieldsForUser(user: KioskUser): FaceRegistrationFields {
+  return {
+    full_name: user.full_name, student_code: user.student_code ?? undefined, email: user.email ?? undefined,
+    phone: user.phone ?? undefined, faculty: user.faculty ?? undefined, major: user.major ?? undefined,
+    admission_year: user.admission_year ?? undefined,
+  };
+}
 
 export default function FaceRegistrationScreen({ videoRef, cameraStatus, cameraError, busy, qualityReady, faceCount = 0,
   faceGuideRects = [], multipleFacesDetected = false, capturePrepared = false, captureCountdown = 3, captureFrame,
-  onCaptureStart, onCaptureEnd, onEnroll, onCancel }: {
+  existingUser, onCaptureStart, onCaptureEnd, onEnroll, onCancel }: {
   videoRef: Ref<HTMLVideoElement>; cameraStatus: CameraStatus; cameraError?: string | null; busy: boolean; qualityReady?: boolean;
   faceCount?: number; faceGuideRects?: FaceGuideRect[]; multipleFacesDetected?: boolean; capturePrepared?: boolean; captureCountdown?: number;
+  existingUser?: KioskUser | null;
   captureFrame: () => Promise<Blob>; onEnroll: (fields: FaceRegistrationFields, image: Blob) => Promise<unknown>;
   onCaptureStart: () => void; onCaptureEnd: () => void;
   onCancel: () => void;
 }) {
-  const [step, setStep] = useState<WizardStep>("identity");
-  const [fields, setFields] = useState<FaceRegistrationFields>({ full_name: "" });
+  const reenrollment = Boolean(existingUser);
+  const [step, setStep] = useState<WizardStep>(() => reenrollment ? "capture" : "identity");
+  const [fields, setFields] = useState<FaceRegistrationFields>(() => existingUser
+    ? registrationFieldsForUser(existingUser) : { full_name: "" });
   const enrolling = useRef(false);
   const [error, setError] = useState("");
-  const activeStep = step === "capture" ? 2 : step === "processing" ? 3 : 1;
+  const progressSteps = reenrollment ? reenrollmentProgress : newUserProgress;
+  const activeStep = reenrollment ? (step === "processing" ? 2 : 1) : step === "capture" ? 2 : step === "processing" ? 3 : 1;
   const update = (name: keyof FaceRegistrationFields, value: string) => setFields((current) => ({
     ...current, [name]: name === "admission_year" ? (value ? Number(value) : undefined) : value,
   }));
@@ -74,11 +87,11 @@ export default function FaceRegistrationScreen({ videoRef, cameraStatus, cameraE
       <div className="registration-camera"><CameraPreview videoRef={videoRef} status={cameraStatus} error={cameraError}
         showFrameOverlay faceCount={faceCount} faceGuideRects={faceGuideRects} qualityReady={Boolean(qualityReady)}
         multipleFacesDetected={multipleFacesDetected} kioskState="REGISTER"/></div>
-      <div><span className="kiosk-kicker">BƯỚC 2 · NHẬN DIỆN KHUÔN MẶT</span><h1>Nhìn thẳng vào camera</h1><p>Đứng một mình trong khung hình, bỏ khẩu trang nếu có và giữ yên khuôn mặt.</p>
+      <div><span className="kiosk-kicker">{reenrollment ? "ĐĂNG KÝ LẠI FACE ID" : "BƯỚC 2 · NHẬN DIỆN KHUÔN MẶT"}</span><h1>Nhìn thẳng vào camera</h1><p>{reenrollment ? `Đang thay Face ID cho ${existingUser?.full_name}. Thông tin hồ sơ hiện tại sẽ được giữ nguyên.` : "Đứng một mình trong khung hình, bỏ khẩu trang nếu có và giữ yên khuôn mặt."}</p>
         {multipleFacesDetected && <div className="registration-error registration-multiple-faces" role="alert">Phát hiện nhiều khuôn mặt. Vui lòng chỉ để một người xuất hiện trong khung hình.</div>}
         {error && <div className="registration-error" role="alert">{error}</div>}
         {!multipleFacesDetected && faceCount === 1 && qualityReady && !capturePrepared && <CountdownAnimation value={captureCountdown}/>}
-        <div className="registration-actions"><span role="status">{multipleFacesDetected ? "Đăng ký đang bị khóa" : faceCount === 0 ? "Đưa khuôn mặt vào khung" : !qualityReady ? "Tiến lại gần và nhìn thẳng" : !capturePrepared ? "Giữ yên khuôn mặt" : "Đang tạo Face ID…"}</span><button className="kiosk-ghost" onClick={() => setStep("academic")}>Sửa thông tin</button><button className="kiosk-ghost" onClick={onCancel}>Hủy đăng ký</button></div>
+        <div className="registration-actions"><span role="status">{multipleFacesDetected ? "Đăng ký đang bị khóa" : faceCount === 0 ? "Đưa khuôn mặt vào khung" : !qualityReady ? "Tiến lại gần và nhìn thẳng" : !capturePrepared ? "Giữ yên khuôn mặt" : "Đang tạo Face ID…"}</span>{!reenrollment && <button className="kiosk-ghost" onClick={() => setStep("academic")}>Sửa thông tin</button>}<button className="kiosk-ghost" onClick={onCancel}>{reenrollment ? "Quay lại hồ sơ" : "Hủy đăng ký"}</button></div>
       </div>
     </div> : null}
   </div>;
