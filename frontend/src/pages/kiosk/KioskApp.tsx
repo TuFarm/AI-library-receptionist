@@ -13,6 +13,7 @@ import WelcomeScreen from "./WelcomeScreen";
 import { isRecognitionState, RecognitionScreen } from "./RecognitionScreen";
 import { kioskEvents } from "../../runtime/eventBus";
 import { RuntimeEvent as Events } from "../../runtime/events";
+import { isDeveloperControlsEnabled } from "../../config/developerControls";
 
 const VOICE = new Set(["AI_GREETING", "VOICE_LISTENING", "USER_SPEAKING", "PROCESSING", "AI_SPEAKING", "LISTENING"]);
 export default function KioskApp() {
@@ -50,5 +51,13 @@ export default function KioskApp() {
   </div>;
   return <KioskChrome state={state} onExit={state !== "IDLE" ? () => flow.transitionTo("SURVEY") : undefined}>
     {content}
+    {isDeveloperControlsEnabled && <details className="kiosk-dev-panel">
+      <summary>Runtime diagnostics</summary>
+      <pre>{JSON.stringify({ state, camera: camera.cameraStatus,
+        presence: sensor.externalPresence ? "external sensor" : "not connected" }, null, 2)}</pre>
+      <button disabled={state !== "IDLE" || flow.isProcessing} onClick={() => void flow.startSession()}>
+        Giả lập cảm biến chuyển động
+      </button>
+    </details>}
   </KioskChrome>;
 }
