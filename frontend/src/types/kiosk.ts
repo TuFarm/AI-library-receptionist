@@ -11,6 +11,9 @@ export type MicStatus = "IDLE" | "LISTENING" | "PROCESSING" | "DENIED" | "UNSUPP
 export type MessageInputMethod = "TEXT" | "VOICE";
 export type VoiceState = "VOICE_IDLE" | "LISTENING" | "USER_SPEAKING" | "TRANSCRIBING" | "PROCESSING_AI" | "AI_SPEAKING" | "VOICE_ERROR";
 export type WelcomeContext = "returning" | "new_enrollment" | "reenrollment";
+export type FaceGuideRect = {
+  x_pct: number; y_pct: number; width_pct: number; height_pct: number; quality_ok: boolean;
+};
 
 export type KioskUser = {
   id: string; student_code: string | null; full_name: string; email?: string | null; phone?: string | null;

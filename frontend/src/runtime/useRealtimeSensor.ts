@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { useCamera } from "../hooks/useCamera";
 import type { useKioskFlow } from "../hooks/useKioskFlow";
-import type { FaceVerifyResult } from "../types/kiosk";
+import type { FaceGuideRect, FaceVerifyResult } from "../types/kiosk";
 import { kioskEvents } from "./eventBus";
 import { RuntimeEvent as Events } from "./events";
 import { kioskStream } from "./stream";
@@ -16,6 +16,7 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
   const [qualityReady, setQualityReady] = useState(false);
   const [faceCount, setFaceCount] = useState(0);
   const [multipleFacesDetected, setMultipleFacesDetected] = useState(false);
+  const [faceGuideRects, setFaceGuideRects] = useState<FaceGuideRect[]>([]);
   const [captureGeneration, setCaptureGeneration] = useState(0);
   const [capturePrepared, setCapturePrepared] = useState(false);
   const [captureCountdown, setCaptureCountdown] = useState(3);
@@ -177,7 +178,8 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
       if (event === Events.recognitionStarted && ["CAMERA_PREPARING", "FACE_TRACKING"].includes(f.currentState)) f.transitionTo("FACE_RECOGNIZING");
       if (event === Events.faceTracking) {
         if (["CAMERA_PREPARING", "FACE_RECOGNIZING"].includes(f.currentState)) f.transitionTo("FACE_TRACKING");
-        const faces = payload.faces as { track_id: number; quality_ok: boolean; guidance: string | null }[];
+        const faces = payload.faces as { track_id: number; quality_ok: boolean; guidance: string | null;
+          guide_rect?: { x_pct?: number; y_pct?: number; width_pct?: number; height_pct?: number } }[];
         const wasMultiple = multipleFacesDetectedRef.current;
         const nextTrackId = faces.length === 1 ? faces[0].track_id : null;
         if (trackIdRef.current !== nextTrackId) {
@@ -188,6 +190,14 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
         trackIdRef.current = nextTrackId;
         faceCountRef.current = faces.length;
         setFaceCount(faces.length);
+        setFaceGuideRects(faces.flatMap(face => {
+          const rect = face.guide_rect;
+          const values = rect && [rect.x_pct, rect.y_pct, rect.width_pct, rect.height_pct];
+          return values?.every(value => Number.isFinite(value)) ? [{
+            x_pct: Number(rect!.x_pct), y_pct: Number(rect!.y_pct), width_pct: Number(rect!.width_pct),
+            height_pct: Number(rect!.height_pct), quality_ok: Boolean(face.quality_ok),
+          }] : [];
+        }));
         if (faces.length !== 1 || !faces[0].quality_ok) {
           enrollmentEvidence.current.invalidateEvidence();
           resetUnknownRecognition();
@@ -236,6 +246,7 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
         if (captureActiveRef.current) restartEnrollmentCapture();
         else enrollmentEvidence.current.endCapture();
         updateQualityReady(false);
+        setFaceGuideRects([]);
         setGuidance(event === Events.streamError ? String(payload.message) : "Đang kết nối lại với trợ lý…");
         if (f.currentState === "IDENTITY_CONFIRMING") f.dispatch({ type: "SET_ERROR", error: "Xác nhận bị gián đoạn. Vui lòng bắt đầu phiên mới." });
       }
@@ -270,6 +281,7 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
     multipleFacesDetectedRef.current = false;
     trackIdRef.current = null;
     setFaceCount(0);
+    setFaceGuideRects([]);
     setMultipleFacesDetected(false);
     updateQualityReady(false);
     const mode = registration ? "registration" : (sensing || state === "IDENTITY_CONFIRMING") ? "recognition" : state === "IDLE" ? "idle" : "conversation";
@@ -324,7 +336,7 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
       performance.now(),
     );
   };
-  return { guidance, qualityReady, faceCount, multipleFacesDetected, sensing, externalPresence,
+  return { guidance, qualityReady, faceCount, faceGuideRects, multipleFacesDetected, sensing, externalPresence,
     captureEnrollmentFrame, beginEnrollmentCapture, endEnrollmentCapture, captureGeneration, capturePrepared,
     captureCountdown, frozenFrameUrl };
 }

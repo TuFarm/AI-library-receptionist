@@ -12,7 +12,9 @@ const noRef = () => undefined;
 const user: KioskUser = { id: "u1", student_code: "001", full_name: "Nguyễn Văn An" };
 const recognition = (state: "CAMERA_PREPARING" | "IDENTITY_CONFIRMING" | "UNKNOWN_FACE") => renderToStaticMarkup(
   <RecognitionScreen state={state} videoRef={noRef} cameraStatus="READY" guidance="Giữ yên"
-    qualityReady={state !== "CAMERA_PREPARING"} faceCount={1} multipleFacesDetected={false} onRegister={noRef}/>,
+    qualityReady={state !== "CAMERA_PREPARING"} faceCount={1}
+    faceGuideRects={[{ x_pct: 25, y_pct: 18, width_pct: 30, height_pct: 42, quality_ok: true }]}
+    multipleFacesDetected={false} onRegister={noRef}/>,
 );
 
 describe("kiosk recognition and welcome UI", () => {
@@ -40,8 +42,11 @@ describe("kiosk recognition and welcome UI", () => {
 
   it("shows a production-safe orange guide without biometric diagnostics", () => {
     const html = renderToStaticMarkup(<CameraPreview videoRef={noRef} status="READY" faceCount={1}
+      faceGuideRects={[{ x_pct: 22.5, y_pct: 14, width_pct: 31, height_pct: 48, quality_ok: false }]}
       qualityReady={false} multipleFacesDetected={false} kioskState="FACE_TRACKING"/>);
     expect(html).toContain("face-guide-analyzing");
+    expect(html).toContain("left:22.5%");
+    expect(html).not.toContain("scan-line");
     expect(html).not.toMatch(/Track #|track_id|landmark|confidence|diagnostics/i);
   });
 

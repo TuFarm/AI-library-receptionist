@@ -232,7 +232,7 @@ def test_stream_recovers_from_invalid_frame_without_committing(monkeypatch):
         assert socket.receive_json()["payload"]["sent_at"] == 42
 
 
-def test_production_stream_omits_face_coordinates_and_diagnostics(monkeypatch):
+def test_production_stream_sends_only_sanitized_guide_geometry(monkeypatch):
     monkeypatch.setattr(runtime.settings, "face_diagnostics_enabled", False)
 
     def inspect(self, _data):
@@ -260,11 +260,23 @@ def test_production_stream_omits_face_coordinates_and_diagnostics(monkeypatch):
             "track_id": 1,
             "quality_ok": False,
             "guidance": "Giữ yên khuôn mặt",
+            "guide_rect": {"x_pct": 0.0, "y_pct": 0.0, "width_pct": 100.0, "height_pct": 100.0},
         }]}
+        assert "box" not in tracking["payload"]["faces"][0]
+        assert "landmarks" not in tracking["payload"]["faces"][0]
+        assert "quality_metrics" not in tracking["payload"]["faces"][0]
         quality = next(event for event in events if event["event"] == "face_quality_bad")
         assert "box" not in quality["payload"]
         assert "landmarks" not in quality["payload"]
         assert "quality_metrics" not in quality["payload"]
+
+
+def test_face_guide_rect_is_rounded_padded_and_mirrored():
+    left_face = runtime._face_guide_rect({"box": [40, 100, 100, 40]}, 200, 200)
+    right_face = runtime._face_guide_rect({"box": [40, 160, 100, 100]}, 200, 200)
+    assert left_face == {"x_pct": 45.8, "y_pct": 15.8, "width_pct": 38.4, "height_pct": 38.4}
+    assert right_face == {"x_pct": 15.8, "y_pct": 15.8, "width_pct": 38.4, "height_pct": 38.4}
+    assert runtime._face_guide_rect({}, 200, 200) is None
 
 
 def test_registration_stream_emits_multiple_face_lock_without_quality_good(monkeypatch):

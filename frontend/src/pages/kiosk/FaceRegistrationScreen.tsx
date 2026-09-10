@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent, type Ref } from "react";
 import { CountdownAnimation, ScanningAnimation } from "../../components/kiosk/KioskAnimations";
 import { CameraPreview } from "../../components/kiosk/CameraPreview";
-import type { CameraStatus, FaceRegistrationFields } from "../../types/kiosk";
+import type { CameraStatus, FaceGuideRect, FaceRegistrationFields } from "../../types/kiosk";
 
 type WizardStep = "identity" | "academic" | "capture" | "processing";
 const progressSteps = ["Thông tin", "Nhận diện khuôn mặt", "Xử lý", "Hoàn tất"];
 
 export default function FaceRegistrationScreen({ videoRef, cameraStatus, cameraError, busy, qualityReady, faceCount = 0,
-  multipleFacesDetected = false, capturePrepared = false, captureCountdown = 3, captureFrame,
+  faceGuideRects = [], multipleFacesDetected = false, capturePrepared = false, captureCountdown = 3, captureFrame,
   onCaptureStart, onCaptureEnd, onEnroll, onCancel }: {
   videoRef: Ref<HTMLVideoElement>; cameraStatus: CameraStatus; cameraError?: string | null; busy: boolean; qualityReady?: boolean;
-  faceCount?: number; multipleFacesDetected?: boolean; capturePrepared?: boolean; captureCountdown?: number;
+  faceCount?: number; faceGuideRects?: FaceGuideRect[]; multipleFacesDetected?: boolean; capturePrepared?: boolean; captureCountdown?: number;
   captureFrame: () => Promise<Blob>; onEnroll: (fields: FaceRegistrationFields, image: Blob) => Promise<unknown>;
   onCaptureStart: () => void; onCaptureEnd: () => void;
   onCancel: () => void;
@@ -72,7 +72,8 @@ export default function FaceRegistrationScreen({ videoRef, cameraStatus, cameraE
     </form> : null}
     {step === "capture" ? <div className="registration-capture-step">
       <div className="registration-camera"><CameraPreview videoRef={videoRef} status={cameraStatus} error={cameraError}
-        showFrameOverlay faceCount={faceCount} qualityReady={Boolean(qualityReady)} multipleFacesDetected={multipleFacesDetected} kioskState="REGISTER"/></div>
+        showFrameOverlay faceCount={faceCount} faceGuideRects={faceGuideRects} qualityReady={Boolean(qualityReady)}
+        multipleFacesDetected={multipleFacesDetected} kioskState="REGISTER"/></div>
       <div><span className="kiosk-kicker">BƯỚC 2 · NHẬN DIỆN KHUÔN MẶT</span><h1>Nhìn thẳng vào camera</h1><p>Đứng một mình trong khung hình, bỏ khẩu trang nếu có và giữ yên khuôn mặt.</p>
         {multipleFacesDetected && <div className="registration-error registration-multiple-faces" role="alert">Phát hiện nhiều khuôn mặt. Vui lòng chỉ để một người xuất hiện trong khung hình.</div>}
         {error && <div className="registration-error" role="alert">{error}</div>}

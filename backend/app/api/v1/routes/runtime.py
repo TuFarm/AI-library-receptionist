@@ -45,6 +45,31 @@ def _public_face(detection: dict) -> dict:
     return payload
 
 
+def _face_guide_rect(detection: dict, frame_width: int, frame_height: int) -> dict | None:
+    """Return padded, mirrored presentation geometry without exposing the raw detector box."""
+    try:
+        if frame_width <= 0 or frame_height <= 0:
+            return None
+        top, right, bottom, left = (float(value) for value in detection["box"])
+        face_width = max(1.0, right - left)
+        face_height = max(1.0, bottom - top)
+        side = max(face_width, face_height) * 1.28
+        center_x = (left + right) / 2
+        center_y = (top + bottom) / 2
+        guide_left = max(0.0, min(frame_width - side, frame_width - center_x - side / 2))
+        guide_top = max(0.0, min(frame_height - side, center_y - side / 2))
+        guide_width = min(side, frame_width - guide_left)
+        guide_height = min(side, frame_height - guide_top)
+        return {
+            "x_pct": round(guide_left * 100 / frame_width, 1),
+            "y_pct": round(guide_top * 100 / frame_height, 1),
+            "width_pct": round(guide_width * 100 / frame_width, 1),
+            "height_pct": round(guide_height * 100 / frame_height, 1),
+        }
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
 def _recognition_payload(track_id: int, result, metrics: dict) -> dict:
     payload = {
         "track_id": track_id,
@@ -168,9 +193,16 @@ async def stream(socket: WebSocket):
                         continue
                     last_frame = started
                     image, detections = await run_in_threadpool(vision.inspect, data)
-                    tracking_payload = {
-                        "faces": [_public_face(detection) for detection in detections]
-                    }
+                    public_faces = []
+                    for detection in detections:
+                        public_face = _public_face(detection)
+                        guide_rect = (_face_guide_rect(
+                            detection, int(image.shape[1]), int(image.shape[0])
+                        ) if image is not None else None)
+                        if guide_rect:
+                            public_face["guide_rect"] = guide_rect
+                        public_faces.append(public_face)
+                    tracking_payload = {"faces": public_faces}
                     if settings.face_diagnostics_enabled:
                         tracking_payload.update({
                             "frame_size": [int(image.shape[1]), int(image.shape[0])],

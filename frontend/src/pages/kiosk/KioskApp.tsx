@@ -25,7 +25,7 @@ export default function KioskApp() {
   if (VOICE.has(state)) content = <KioskVoiceChatScreen flow={flow}/>;
   else if (state === "REGISTER" || state === "REGISTER_PROCESSING") content = <FaceRegistrationScreen videoRef={camera.videoRef} cameraStatus={camera.cameraStatus}
     cameraError={camera.error} busy={flow.isProcessing} captureFrame={sensor.captureEnrollmentFrame} qualityReady={sensor.qualityReady}
-    faceCount={sensor.faceCount} multipleFacesDetected={sensor.multipleFacesDetected} onEnroll={flow.enrollFace}
+    faceCount={sensor.faceCount} faceGuideRects={sensor.faceGuideRects} multipleFacesDetected={sensor.multipleFacesDetected} onEnroll={flow.enrollFace}
     capturePrepared={sensor.capturePrepared} captureCountdown={sensor.captureCountdown}
     onCaptureStart={sensor.beginEnrollmentCapture} onCaptureEnd={sensor.endEnrollmentCapture}
     onCancel={() => flow.transitionTo("UNKNOWN_FACE")}/>;
@@ -40,7 +40,7 @@ export default function KioskApp() {
   else if (state === "THANK_YOU") content = <KioskThankYouScreen onHome={() => flow.transitionTo("RETURN_IDLE")}/>;
   else if (isRecognitionState(state)) content = <RecognitionScreen state={state} videoRef={camera.videoRef}
     cameraStatus={camera.cameraStatus} cameraError={camera.error} guidance={sensor.guidance} qualityReady={sensor.qualityReady}
-    faceCount={sensor.faceCount} multipleFacesDetected={sensor.multipleFacesDetected}
+    faceCount={sensor.faceCount} faceGuideRects={sensor.faceGuideRects} multipleFacesDetected={sensor.multipleFacesDetected}
     onRegister={() => { kioskEvents.publish(Events.registrationRequested); kioskStream.send(Events.registrationRequested); }}/>;
   else content = <div className="kiosk-center assistant-stage">
     <AssistantAvatar mood={state === "ERROR" ? "error" : state === "UNKNOWN_FACE" ? "unknown" : state === "FACE_RECOGNIZED" ? "happy" : state === "RETURN_IDLE" ? "goodbye" : state === "IDLE" ? "idle" : "greeting"}/>
