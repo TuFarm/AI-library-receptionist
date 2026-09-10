@@ -13,7 +13,7 @@ from app.core.errors import AppError
 from app.core.responses import success_response
 from app.models.schema import Device, FaceAuthenticationLog, FaceProfile, User, UserSession
 from app.services.face_service import (
-    FaceImageError, FaceProviderUnavailable, FaceService,
+    FaceImageError, FaceProviderUnavailable, FaceService, get_face_provider,
     MultipleFacesDetectedError, NoFaceDetectedError,
 )
 from app.services.interaction_service import record_event
@@ -49,8 +49,8 @@ async def enroll(
     try:
         path = await storage.save_image(image_file, "enrollments")
         face_service = FaceService()
-        # This must complete before looking up, creating, or mutating a User.
-        validated_encoding = face_service.validate_enrollment_image(path)
+        # Detection, quality, embedding and serialization must all complete before DB access.
+        enrollment_result = face_service.prepare_enrollment(path)
     except MediaValidationError as exc:
         raise AppError(400, "INVALID_IMAGE", str(exc)) from exc
     except MultipleFacesDetectedError as exc:
@@ -65,6 +65,10 @@ async def enroll(
     except FaceProviderUnavailable as exc:
         storage.cleanup(path)
         raise AppError(503, "FACE_PROVIDER_UNAVAILABLE", str(exc)) from exc
+    except Exception:
+        if "path" in locals():
+            storage.cleanup(path)
+        raise
 
     try:
         session = db.get(UserSession, session_id) if session_id else None
@@ -98,16 +102,23 @@ async def enroll(
             if major: user.major = major
             if admission_year is not None: user.admission_year = admission_year
 
-        result = face_service.enroll_face(user.id, path, validated_encoding=validated_encoding)
+        result = enrollment_result
+        # Keep rollback profiles from other providers intact. A successful
+        # re-enrollment updates only the same model/version profile.
         profile = db.scalar(select(FaceProfile).where(
-            FaceProfile.user_id == user.id, FaceProfile.active.is_(True), FaceProfile.deleted_at.is_(None)))
+            FaceProfile.user_id == user.id,
+            FaceProfile.active.is_(True),
+            FaceProfile.deleted_at.is_(None),
+            FaceProfile.model_name == result.model_name,
+            FaceProfile.model_version == result.model_version,
+        ))
         if profile is None:
             profile = FaceProfile(user_id=user.id, enrolled_at=datetime.now(UTC), active=True)
             db.add(profile)
         profile.face_template_ref = result.template_ref
         profile.face_template_encrypted = result.template_bytes
         profile.model_name = result.model_name
-        profile.model_version = "1"
+        profile.model_version = result.model_version
         profile.quality_score = Decimal(str(result.quality_score))
         if session:
             session.user_id = user.id
@@ -153,9 +164,20 @@ async def verify(session_id: UUID | None = Form(default=None), device_code: str 
         raise AppError(404, "SESSION_NOT_FOUND", "Không tìm thấy phiên kiosk.")
     try:
         path = await storage.save_image(image_file, "verification")
+        provider = get_face_provider()
         profiles = db.scalars(select(FaceProfile).where(
-            FaceProfile.active.is_(True), FaceProfile.deleted_at.is_(None)).order_by(FaceProfile.enrolled_at)).all()
-        candidates = [(profile.user_id, profile.face_template_encrypted, profile.face_template_ref) for profile in profiles]
+            FaceProfile.active.is_(True),
+            FaceProfile.deleted_at.is_(None),
+            FaceProfile.model_name == provider.name,
+            FaceProfile.model_version == provider.model_version,
+        ).order_by(FaceProfile.enrolled_at)).all()
+        candidates = [(
+            profile.user_id,
+            profile.face_template_encrypted,
+            profile.face_template_ref,
+            profile.model_name,
+            profile.model_version,
+        ) for profile in profiles]
         result = FaceService().verify_face(path, candidates)
         user = db.get(User, result.user_id) if result.user_id else None
         processing_ms = int((perf_counter() - started) * 1000)
@@ -182,6 +204,10 @@ async def verify(session_id: UUID | None = Form(default=None), device_code: str 
             "processing_time_ms": processing_ms}, message)
     except MediaValidationError as exc:
         raise AppError(400, "INVALID_IMAGE", str(exc)) from exc
+    except MultipleFacesDetectedError as exc:
+        raise AppError(422, "MULTIPLE_FACES_DETECTED", str(exc), {"face_count": exc.face_count}) from exc
+    except NoFaceDetectedError as exc:
+        raise AppError(422, "NO_FACE_DETECTED", str(exc)) from exc
     except FaceImageError as exc:
         raise AppError(422, "FACE_IMAGE_INVALID", str(exc)) from exc
     except FaceProviderUnavailable as exc:

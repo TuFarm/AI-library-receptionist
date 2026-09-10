@@ -7,6 +7,7 @@ import { RuntimeEvent as Events } from "./events";
 import { kioskStream } from "./stream";
 import { isDeveloperControlsEnabled } from "../config/developerControls";
 import { EnrollmentEvidenceGuard } from "./enrollmentEvidence";
+import { FaceLatencyBenchmark } from "./latencyBenchmark";
 
 const sensingStates = new Set(["CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING", "UNKNOWN_FACE", "REGISTER"]);
 export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera: ReturnType<typeof useCamera>) {
@@ -23,6 +24,11 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
   const faceCountRef = useRef(0);
   const trackIdRef = useRef<number | null>(null);
   const frozenUrlRef = useRef<string | null>(null);
+  const latencyBenchmark = useRef(new FaceLatencyBenchmark());
+  const stableRecognitionAt = useRef<number | null>(null);
+  const latestVisionMetrics = useRef<Record<string, unknown>>({});
+  const latestRecognitionMetrics = useRef<Record<string, unknown>>({});
+  const latestRecognitionFrameSentAt = useRef<number | null>(null);
   const state = flow.currentState;
   const sensing = sensingStates.has(state);
   const registration = state === "REGISTER" || state === "REGISTER_PROCESSING";
@@ -55,8 +61,13 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
         enrollmentEvidence.current.accept(sentFrame.current, String(payload.session_id), Number(payload.track_id), performance.now());
         setQualityReady(true);
       }
+      if (isDeveloperControlsEnabled && event === Events.faceQualityGood && f.currentState !== "REGISTER" && stableRecognitionAt.current === null) {
+        stableRecognitionAt.current = performance.now();
+      }
       if (event === Events.multipleFacesDetected && f.currentState === "REGISTER" && payload.session_id === f.session?.session_id) {
         enrollmentEvidence.current.invalidate();
+        sentFrame.current = null;
+        trackIdRef.current = null;
         faceCountRef.current = Number(payload.face_count) || 2;
         setFaceCount(faceCountRef.current);
         setMultipleFacesDetected(true);
@@ -91,15 +102,46 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
         setFaceCount(faces.length);
         if (faces.length !== 1 || !faces[0].quality_ok) {
           enrollmentEvidence.current.invalidate();
+          if (faces.length !== 1) sentFrame.current = null;
           setQualityReady(false);
         }
         setMultipleFacesDetected(faces.length >= 2);
         setGuidance(faces.length >= 2 ? "Phát hiện nhiều khuôn mặt. Vui lòng chỉ để một người xuất hiện trong khung hình."
           : faces[0]?.guidance ?? (faces.length ? "Đang kiểm tra độ ổn định…" : "Vui lòng đưa khuôn mặt vào camera"));
-        setDiagnostics(d => ({ ...d, faces, vision: payload.metrics }));
+        if (isDeveloperControlsEnabled) {
+          setDiagnostics(d => ({ ...d, faces, vision: payload.metrics }));
+          latestVisionMetrics.current = payload.metrics as Record<string, unknown>;
+        }
       }
       if (event === Events.pong && isDeveloperControlsEnabled) void window.kiosk?.getDiagnostics?.().then(electron => setDiagnostics(d => ({ ...d, electron })));
-      if ([Events.frameReady, Events.recognitionProgress, Events.recognitionFinished, Events.transportLatency].includes(event as never)) setDiagnostics(d => ({ ...d, [event]: payload }));
+      if (isDeveloperControlsEnabled && [Events.frameReady, Events.recognitionProgress, Events.recognitionFinished, Events.transportLatency].includes(event as never)) setDiagnostics(d => ({ ...d, [event]: payload }));
+      if (isDeveloperControlsEnabled && event === Events.recognitionFinished && kioskStream.lastFrameSentAt !== null) {
+        latestRecognitionFrameSentAt.current = kioskStream.lastFrameSentAt;
+        latestRecognitionMetrics.current = payload;
+      }
+      if (isDeveloperControlsEnabled && event === Events.identityConfirmed &&
+          latestRecognitionFrameSentAt.current !== null && stableRecognitionAt.current !== null) {
+        const sentAt = latestRecognitionFrameSentAt.current;
+        const stableAt = stableRecognitionAt.current;
+        const visionMetrics = latestVisionMetrics.current;
+        const recognitionMetrics = latestRecognitionMetrics.current;
+        window.requestAnimationFrame(() => {
+          latencyBenchmark.current.add({
+            decode_ms: Number(visionMetrics.decode_ms),
+            detection_ms: Number(visionMetrics.detection_ms),
+            quality_tracking_ms: Number(visionMetrics.quality_tracking_ms),
+            embedding_ms: Number(recognitionMetrics.embedding_ms),
+            profile_query_ms: Number(recognitionMetrics.profile_query_ms),
+            search_ms: Number(recognitionMetrics.search_ms),
+            websocket_ui_round_trip_ms: performance.now() - sentAt,
+            total_ms: performance.now() - stableAt,
+          });
+          setDiagnostics(d => ({ ...d, faceLatencyBenchmark: latencyBenchmark.current.summary() }));
+          stableRecognitionAt.current = null;
+          latestRecognitionFrameSentAt.current = null;
+          latestRecognitionMetrics.current = {};
+        });
+      }
       if (event === Events.identityConfirmed && (sensingStates.has(f.currentState) || f.currentState === "IDENTITY_CONFIRMING") && f.currentState !== "REGISTER") {
         // Stop physical tracks before publishing the UI identity transition.
         c.stopCamera();
@@ -133,6 +175,9 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
   }, [state]);
   useEffect(() => {
     enrollmentEvidence.current.invalidate();
+    stableRecognitionAt.current = null;
+    latestRecognitionFrameSentAt.current = null;
+    latestRecognitionMetrics.current = {};
     faceCountRef.current = 0;
     trackIdRef.current = null;
     setFaceCount(0);
@@ -151,7 +196,13 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
       try {
         if (kioskStream.frameReady) {
           const blob = await camera.captureFrame();
-          if (active && kioskStream.frame(blob)) { sentFrame.current = blob; frames++; setDiagnostics(d => ({ ...d, fps: frames * 1000 / (performance.now()-started) })); }
+          if (active && kioskStream.frame(blob)) {
+            sentFrame.current = blob;
+            frames++;
+            if (isDeveloperControlsEnabled) {
+              setDiagnostics(d => ({ ...d, fps: frames * 1000 / (performance.now()-started) }));
+            }
+          }
         }
       } catch { /* Track loss is reported by the camera adapter; never queue frames. */ }
       if (active) timer = window.setTimeout(sample, idleCamera ? 750 : 33);

@@ -1,5 +1,12 @@
 import { hasLiveVideoTrack, waitForVideoFrame } from "../config/cameraRuntime";
 
+function configuredDimension(value: unknown, minimum: number, maximum: number, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, parsed)) : fallback;
+}
+const CAMERA_WIDTH = configuredDimension(import.meta.env.VITE_KIOSK_CAMERA_WIDTH, 1280, 1920, 1920);
+const CAMERA_HEIGHT = configuredDimension(import.meta.env.VITE_KIOSK_CAMERA_HEIGHT, 720, 1080, 1080);
+
 async function attach(video: HTMLVideoElement, stream: MediaStream) {
   if (video.srcObject !== stream) video.srcObject = stream;
   video.muted = true; video.playsInline = true;
@@ -27,7 +34,7 @@ export class CameraManager {
     }
     const generation = this.generation;
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user", width: { ideal: 1920, min: 1280 }, height: { ideal: 1080, min: 720 }, frameRate: { ideal: 30, max: 30 } },
+      video: { facingMode: "user", width: { ideal: CAMERA_WIDTH, min: 1280 }, height: { ideal: CAMERA_HEIGHT, min: 720 }, frameRate: { ideal: 30, max: 30 } },
       audio: false,
     });
     if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return false; }

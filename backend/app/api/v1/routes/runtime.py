@@ -20,7 +20,7 @@ from app.core.database import SessionLocal
 from app.models.schema import Conversation, FaceAuthenticationLog, FaceProfile, User, UserSession
 from app.schemas.ai import AIRuntimeRequest
 from app.schemas.voice import BrowserTranscriptCreate
-from app.services.face_service import FaceProviderUnavailable
+from app.services.face_service import FaceProviderUnavailable, get_face_provider
 from app.services.interaction_service import record_event
 from app.vision.engine import VisionEngine
 from app.vision.event_publisher import EventPublisher
@@ -32,6 +32,28 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 MULTIPLE_FACES_GUIDANCE = "Phát hiện nhiều khuôn mặt. Vui lòng chỉ để một người xuất hiện trong khung hình."
+
+
+def _public_face(detection: dict) -> dict:
+    payload = {
+        "track_id": detection["track_id"],
+        "quality_ok": bool(detection["quality_ok"]),
+        "guidance": detection.get("guidance"),
+    }
+    if settings.face_diagnostics_enabled:
+        payload.update(detection)
+    return payload
+
+
+def _recognition_payload(track_id: int, result, metrics: dict) -> dict:
+    payload = {
+        "track_id": track_id,
+        "confidence": result.confidence_score,
+        "result": result.result,
+    }
+    if settings.face_diagnostics_enabled:
+        payload.update(metrics)
+    return payload
 
 
 @dataclass
@@ -53,12 +75,21 @@ class RegistrationStabilityGate:
 
 
 def load_candidates():
-    if settings.face_provider != "local":
-        raise FaceProviderUnavailable("Realtime identity confirmation requires FACE_PROVIDER=local; mock identity is disabled on the stream")
+    if settings.face_provider not in {"local", "local_opencv"}:
+        raise FaceProviderUnavailable(
+            "Realtime identity confirmation requires a real FaceID provider; mock identity is disabled on the stream"
+        )
+    provider = get_face_provider()
     with SessionLocal() as db:
         profiles = db.scalars(select(FaceProfile).join(User).where(
-            FaceProfile.active.is_(True), FaceProfile.deleted_at.is_(None), User.deleted_at.is_(None))).all()
-        return [(p.user_id, p.face_template_encrypted, p.face_template_ref) for p in profiles]
+            FaceProfile.active.is_(True), FaceProfile.deleted_at.is_(None), User.deleted_at.is_(None),
+            FaceProfile.model_name == provider.name,
+            FaceProfile.model_version == provider.model_version,
+        )).all()
+        return [(
+            p.user_id, p.face_template_encrypted, p.face_template_ref,
+            p.model_name, p.model_version,
+        ) for p in profiles]
 
 
 def confirm(session_id, result):
@@ -97,7 +128,12 @@ def answer(payload):
 @router.websocket("/stream")
 async def stream(socket: WebSocket):
     origin = socket.headers.get("origin", "")
-    if origin not in settings.kiosk_stream_origins.split(","):
+    allowed_origins = {
+        configured.strip()
+        for configured in settings.kiosk_stream_origins.split(",")
+        if configured.strip()
+    }
+    if origin not in allowed_origins:
         await socket.close(code=1008)
         return
     await socket.accept()
@@ -123,21 +159,31 @@ async def stream(socket: WebSocket):
                 try:
                     if len(data) > 2_500_000:
                         raise ValueError("Frame exceeds 2.5 MB")
-                    if controller.locked or started-last_frame < (.7 if controller.mode == "idle" else .025):
+                    frame_interval = (
+                        .7 if controller.mode == "idle"
+                        else settings.face_frame_interval_ms / 1000
+                    )
+                    if controller.locked or started-last_frame < frame_interval:
                         continue
                     last_frame = started
                     image, detections = await run_in_threadpool(vision.inspect, data)
-                    frame_size = [int(image.shape[1]), int(image.shape[0])] if image is not None else [1920, 1080]
-                    await publisher.publish("face_tracking", {"faces": detections, "frame_size": frame_size,
-                                                               "metrics": vision.metrics})
+                    tracking_payload = {
+                        "faces": [_public_face(detection) for detection in detections]
+                    }
+                    if settings.face_diagnostics_enabled:
+                        tracking_payload.update({
+                            "frame_size": [int(image.shape[1]), int(image.shape[0])],
+                            "metrics": vision.metrics,
+                        })
+                    await publisher.publish("face_tracking", tracking_payload)
                     for lifecycle in vision.tracker.last_events:
                         await publisher.publish(lifecycle["event"], {key: value for key, value in lifecycle.items() if key != "event"})
-                    if controller.mode == "registration" and len(detections) != 1:
+                    if controller.mode in {"recognition", "registration"} and len(detections) != 1:
                         registration_gate.reset()
                         controller.clear_evidence()
                         for track in vision.tracks.values():
                             track.reset()
-                        if len(detections) >= 2:
+                        if controller.mode == "registration" and len(detections) >= 2:
                             await publisher.publish("multiple_faces_detected", {
                                 "face_count": len(detections), "guidance": MULTIPLE_FACES_GUIDANCE,
                                 "session_id": controller.session_id,
@@ -152,7 +198,7 @@ async def stream(socket: WebSocket):
                         if controller.mode == "idle" and confirmed_presence:
                             await publisher.publish("presence_detected")
                         if controller.mode in {"recognition", "registration"}:
-                            if controller.mode == "registration" and len(detections) != 1:
+                            if len(detections) != 1:
                                 continue
                             for detection in detections:
                                 track = vision.tracks[detection["track_id"]]
@@ -160,19 +206,19 @@ async def stream(socket: WebSocket):
                                     if controller.mode == "registration":
                                         registration_gate.reset()
                                         controller.clear_evidence()
-                                    await publisher.publish("face_quality_bad", detection)
+                                    await publisher.publish("face_quality_bad", _public_face(detection))
                                     continue
                                 if controller.mode == "registration":
                                     registration_now = monotonic()
                                     if not registration_gate.observe(track.id, registration_now):
                                         continue
                                     await publisher.publish("face_quality_good", {
-                                        **detection, "session_id": controller.session_id,
+                                        **_public_face(detection), "session_id": controller.session_id,
                                         "stable_frames": registration_gate.frames,
                                         "stable_ms": round((registration_now - (registration_gate.since or registration_now)) * 1000),
                                     })
                                     continue
-                                await publisher.publish("face_quality_good", detection)
+                                await publisher.publish("face_quality_good", _public_face(detection))
                                 recognition_now = monotonic()
                                 if controller.mode == "registration" or not recognition.should_recognize(track, recognition_now):
                                     continue
@@ -180,10 +226,22 @@ async def stream(socket: WebSocket):
                                 await publisher.publish("recognition_started", {"track_id": track.id})
                                 attempt_started = monotonic()
                                 try:
-                                    if candidates is None:
+                                    if candidates is None or recognition.gallery_expired(recognition_now):
+                                        query_started = monotonic()
                                         candidates = await run_in_threadpool(load_candidates)
+                                        recognition.profile_query_ms = (
+                                            monotonic() - query_started
+                                        ) * 1000
+                                        recognition.refresh_gallery(recognition_now)
+                                    provider_detection = vision.provider_detection(track.id)
+                                    if provider_detection is None:
+                                        raise ValueError("Face detection evidence unavailable")
                                     result = await run_in_threadpool(
-                                        recognition.recognize, image, tuple(detection["box"]), candidates
+                                        recognition.recognize,
+                                        image,
+                                        [provider_detection],
+                                        candidates,
+                                        True,
                                     )
                                 except Exception:
                                     await publisher.publish("recognition_finished", {
@@ -192,8 +250,9 @@ async def stream(socket: WebSocket):
                                     })
                                     raise
                                 candidate = str(result.user_id) if result.result == "SUCCESS" else None
-                                progress = {"track_id": track.id, "confidence": result.confidence_score,
-                                            "result": result.result, **recognition.metrics}
+                                progress = _recognition_payload(
+                                    track.id, result, recognition.metrics
+                                )
                                 await publisher.publish("recognition_progress", progress)
                                 await publisher.publish("recognition_finished", progress)
                                 if candidate:

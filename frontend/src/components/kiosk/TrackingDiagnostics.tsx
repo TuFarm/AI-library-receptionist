@@ -6,7 +6,17 @@ export function TrackingDiagnostics() {
   const [size, setSize] = useState<number[]>([640, 360]);
   const [confidence, setConfidence] = useState<Record<number, number>>({});
   useEffect(() => kioskEvents.subscribe(({ event, payload }) => {
-    if (event === "face_tracking") { setFaces(payload.faces as Face[]); setSize(payload.frame_size as number[]); }
+    if (event === "face_tracking") {
+      const diagnosticFaces = Array.isArray(payload.faces)
+        ? (payload.faces as Partial<Face>[]).filter(
+            (face): face is Face => Array.isArray(face.box) && face.box.length === 4,
+          )
+        : [];
+      setFaces(diagnosticFaces);
+      if (Array.isArray(payload.frame_size) && payload.frame_size.length === 2) {
+        setSize(payload.frame_size.map(Number));
+      }
+    }
     if (event === "recognition_progress" && typeof payload.confidence === "number") {
       setConfidence(values => ({ ...values, [Number(payload.track_id)]: payload.confidence as number }));
     }

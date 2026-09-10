@@ -1,0 +1,4 @@
+# Optional headless OpenCV runtime for YuNet + SFace ONNX on backend CPU.
+# Keep separate so the default/mock backend remains lightweight.
+opencv-python-headless==4.12.0.88
+Pillow==11.3.0

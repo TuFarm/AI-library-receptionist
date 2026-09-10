@@ -22,8 +22,10 @@ describe("duplex stream lifecycle", () => {
   it("permits one frame until an acknowledgement and never buffers a second", () => {
     const stream = new KioskStream(); stream.connect(); const socket = FakeSocket.instances[0]; socket.onopen?.(); socket.receive("stream_ready");
     expect(stream.frame(new Blob(["frame"]))).toBe(true);
+    expect(stream.lastFrameSentAt).not.toBeNull();
     expect(stream.frame(new Blob(["late"]))).toBe(false);
     socket.receive("frame_ready");
+    expect(stream.lastFrameSentAt).toBeNull();
     expect(stream.frame(new Blob(["next"]))).toBe(true);
     stream.close();
   });

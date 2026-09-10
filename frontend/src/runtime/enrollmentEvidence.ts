@@ -26,6 +26,7 @@ export class EnrollmentEvidenceGuard {
     if (!registration || !sessionId || faceCount !== 1 || !evidence ||
         evidence.sessionId !== sessionId || evidence.trackId !== trackId || evidence.generation !== this.generation ||
         now - evidence.issuedAt > ENROLLMENT_EVIDENCE_TTL_MS) {
+      this.invalidate();
       throw new Error("Vui lòng để đúng một người trong khung hình và giữ yên.");
     }
     this.invalidate(); // A successful capture is single-use.

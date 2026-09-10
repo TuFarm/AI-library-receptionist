@@ -5,13 +5,22 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.core.responses import success_response
+from app.services.face_service import get_face_provider
 
 
 def create_app() -> FastAPI:
+    # Opt-in native providers fail during startup rather than after a visitor
+    # has entered the kiosk flow. Mock and legacy local remain lazily loaded.
+    if settings.face_provider == "local_opencv":
+        get_face_provider("local_opencv")
     app = FastAPI(title=settings.app_name, version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=[
+            origin.strip()
+            for origin in settings.kiosk_stream_origins.split(",")
+            if origin.strip()
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

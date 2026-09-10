@@ -1,38 +1,40 @@
-from io import BytesIO
 from time import monotonic
 
 from app.vision.face_detector import FaceDetector
 from app.vision.face_tracker import FaceTracker
+from app.vision.image_decoder import ImageDecoder
 from app.vision.quality_estimator import QualityEstimator
 
 
 class VisionEngine:
-    def __init__(self, detector=None, tracker=None, quality=None):
+    def __init__(self, decoder=None, detector=None, tracker=None, quality=None):
+        self.decoder = decoder or ImageDecoder()
         self.detector = detector or FaceDetector()
         self.tracker = tracker or FaceTracker()
         self.quality = quality or QualityEstimator()
         self.metrics = {}
         self._last_completed = None
+        self._provider_detections = {}
 
     @property
     def tracks(self):
         return self.tracker.tracks
 
+    def provider_detection(self, track_id: int):
+        return self._provider_detections.get(track_id)
+
     def inspect(self, data):
-        import numpy as np
-        from PIL import Image
         started = monotonic()
-        with Image.open(BytesIO(data)) as source:
-            if source.width > 1920 or source.height > 1080:
-                raise ValueError("Frame dimensions exceed 1920×1080")
-            image = np.asarray(source.convert("RGB"))
+        image = self.decoder.decode(data)
         decoded = monotonic()
         faces = self.detector.detect(image)
         detected = monotonic()
         now = detected
         tracks = self.tracker.update([face.box for face in faces], now)
+        self._provider_detections = {}
         results = []
         for face, track in zip(faces, tracks, strict=True):
+            self._provider_detections[track.id] = face.provider_detection
             quality = self.quality.estimate(image, face, track, len(tracks), now)
             if not quality.accepted:
                 track.reset()

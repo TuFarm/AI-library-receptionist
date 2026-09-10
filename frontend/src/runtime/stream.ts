@@ -11,6 +11,7 @@ export class KioskStream {
   private closed = true;
   private attempt = 0;
   private config: Record<string, unknown> = { mode: "idle" };
+  lastFrameSentAt: number | null = null;
   frameReady = false;
   connect() {
     this.closed = false;
@@ -39,6 +40,7 @@ export class KioskStream {
         else pending.resolve(event.payload);
       }
       kioskEvents.receive(event);
+      if (event.event === Events.frameReady) this.lastFrameSentAt = null;
     };
     socket.onclose = () => {
       if (this.socket !== socket) return;
@@ -63,6 +65,7 @@ export class KioskStream {
   frame(blob: Blob) {
     if (!this.frameReady || this.socket?.readyState !== WebSocket.OPEN || this.socket.bufferedAmount > 2_500_000) return false;
     this.frameReady = false;
+    this.lastFrameSentAt = performance.now();
     this.socket.send(blob);
     this.frameDeadline = window.setTimeout(() => this.socket?.close(), 15000);
     return true;

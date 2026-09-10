@@ -24,7 +24,11 @@ class QualityEstimator:
         blur_score = float(np.var(laplacian))
         marks = face.landmarks
         eyes = [np.asarray(marks[name]) for name in ("left_eye", "right_eye")]
-        eye_ratios = [float(np.linalg.norm(eye[1] - eye[5]) / max(1, np.linalg.norm(eye[0] - eye[3]))) for eye in eyes]
+        detailed_eyes = all(len(eye) >= 6 for eye in eyes)
+        eye_ratios = [
+            float(np.linalg.norm(eye[1] - eye[5]) / max(1, np.linalg.norm(eye[0] - eye[3])))
+            for eye in eyes
+        ] if detailed_eyes else [1.0, 1.0]
         eyes_open = all(ratio > .14 for ratio in eye_ratios)
         centers = [eye.mean(axis=0) for eye in eyes]
         eye_span = max(1, np.linalg.norm(centers[0] - centers[1]))

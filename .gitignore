@@ -1,6 +1,7 @@
 .env
 .venv/
 .venv-codex/
+.venv*/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -22,3 +23,8 @@ dist/
 backend/storage/media/**
 !backend/storage/media/**/
 !backend/storage/media/**/.gitkeep
+
+# Provision ONNX weights outside Git; configure their absolute paths at deploy time.
+backend/models/
+*.onnx
+*.tsbuildinfo

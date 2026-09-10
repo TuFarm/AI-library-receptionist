@@ -1,6 +1,7 @@
 from uuid import uuid4
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -8,9 +9,12 @@ from starlette.websockets import WebSocketDisconnect
 from app.main import app
 from app.api.v1.routes import runtime
 from app.api.v1.routes.runtime import RegistrationStabilityGate
+from app.services.face_service import ProviderFaceDetection
 from app.services.realtime_face_service import RealtimeFaceService, Track, overlap
 from app.vision.engine import VisionEngine
+from app.vision.face_detector import DetectedFace
 from app.vision.presence_detector import PresenceDetector
+from app.vision.quality_estimator import QualityEstimator, QualityResult
 from app.vision.recognition_service import RecognitionService
 from app.vision.session_controller import SessionController
 
@@ -67,6 +71,66 @@ def test_presence_and_session_controllers_reset_connection_evidence():
     assert controller.accept("session-1") is candidate
 
 
+def test_yunet_center_landmarks_pass_realtime_quality_without_dlib_eye_shape():
+    image = (
+        (np.indices((300, 300)).sum(axis=0) % 2)[:, :, None]
+        * np.ones((1, 1, 3))
+        * 200
+    ).astype(np.uint8)
+    provider_detection = ProviderFaceDetection(
+        (30, 250, 250, 20),
+        {
+            "right_eye": [(75, 100)],
+            "left_eye": [(165, 100)],
+            "nose_tip": [(120, 145)],
+            "top_lip": [(85, 205), (155, 205)],
+        },
+        (20.0, 30.0, 230.0, 220.0, 75.0, 100.0, 165.0, 100.0,
+         120.0, 145.0, 85.0, 205.0, 155.0, 205.0, 0.98),
+    )
+    face = DetectedFace(
+        provider_detection.box, provider_detection.quality_input, provider_detection
+    )
+    track = Track(1, face.box, 1.0, 0.5, hits=3)
+    result = QualityEstimator().estimate(image, face, track, 1, 1.0)
+    assert result.accepted is True
+
+
+def test_vision_engine_keeps_provider_evidence_internal_to_current_frame():
+    provider_detection = ProviderFaceDetection(
+        (0, 200, 200, 0),
+        {"left_eye": [(60, 70)], "right_eye": [(140, 70)], "nose_tip": [(100, 110)]},
+        tuple(float(value) for value in range(15)),
+    )
+
+    class Decoder:
+        def decode(self, _data):
+            return np.zeros((200, 200, 3), dtype=np.uint8)
+
+    class Detector:
+        calls = 0
+
+        def detect(self, _image):
+            self.calls += 1
+            return [DetectedFace(
+                provider_detection.box,
+                provider_detection.quality_input,
+                provider_detection,
+            )] if self.calls == 1 else []
+
+    class Quality:
+        def estimate(self, *_args):
+            return QualityResult(True, None, 1.0, {})
+
+    engine = VisionEngine(decoder=Decoder(), detector=Detector(), quality=Quality())
+    _image, events = engine.inspect(b"frame-a")
+    assert engine.provider_detection(events[0]["track_id"]) is provider_detection
+    assert "provider_input" not in events[0]
+    assert "embedding" not in events[0]
+    engine.inspect(b"frame-b")
+    assert engine.provider_detection(events[0]["track_id"]) is None
+
+
 def test_registration_stability_resets_when_another_face_appears(monkeypatch):
     monkeypatch.setattr(runtime.settings, "registration_stable_frames", 3)
     monkeypatch.setattr(runtime.settings, "registration_stable_ms", 500)
@@ -111,11 +175,16 @@ def test_confirmation_requires_three_frames_and_client_acceptance(monkeypatch):
     def inspect(self, data):
         if 1 not in self.tracks:
             self.tracks[1] = Track(1, (0, 100, 100, 0), 0, 0)
+        self._provider_detections[1] = ProviderFaceDetection((0, 100, 100, 0))
         return None, [{"track_id": 1, "quality_ok": True, "box": [0, 100, 100, 0], "guidance": None}]
     monkeypatch.setattr(VisionEngine, "inspect", inspect)
     result = SimpleNamespace(result="SUCCESS", user_id=uuid4(), confidence_score=.93)
     monkeypatch.setattr(runtime, "load_candidates", lambda: [])
-    monkeypatch.setattr(RecognitionService, "recognize", lambda self, image, box, candidates: result)
+    monkeypatch.setattr(
+        RecognitionService,
+        "recognize",
+        lambda self, image, detections, candidates, quality_accepted: result,
+    )
     confirmations = []
     monkeypatch.setattr(runtime, "confirm", lambda session, match: confirmations.append(session) or {"user": {"id": str(match.user_id)}})
     with TestClient(app) as client, client.websocket_connect("/api/v1/kiosk/stream", headers={"origin": "http://localhost:5173"}) as socket:
@@ -147,6 +216,41 @@ def test_stream_recovers_from_invalid_frame_without_committing(monkeypatch):
         assert socket.receive_json()["payload"]["sent_at"] == 42
 
 
+def test_production_stream_omits_face_coordinates_and_diagnostics(monkeypatch):
+    monkeypatch.setattr(runtime.settings, "face_diagnostics_enabled", False)
+
+    def inspect(self, _data):
+        self.tracks[1] = Track(1, (0, 200, 200, 0), 0, 0)
+        return np.zeros((200, 200, 3), dtype=np.uint8), [{
+            "track_id": 1,
+            "quality_ok": False,
+            "guidance": "Giữ yên khuôn mặt",
+            "box": [0, 200, 200, 0],
+            "landmarks": [[50, 50]],
+            "quality_metrics": {"brightness": 100},
+        }]
+
+    monkeypatch.setattr(VisionEngine, "inspect", inspect)
+    with TestClient(app) as client, client.websocket_connect(
+        "/api/v1/kiosk/stream", headers={"origin": "http://localhost:5173"}
+    ) as socket:
+        socket.receive_json()
+        socket.send_json({"event": "CONFIGURE", "payload": {"mode": "recognition"}})
+        read_until(socket, "session_state")
+        socket.send_bytes(b"frame")
+        events = read_until(socket, "frame_ready")
+        tracking = next(event for event in events if event["event"] == "face_tracking")
+        assert tracking["payload"] == {"faces": [{
+            "track_id": 1,
+            "quality_ok": False,
+            "guidance": "Giữ yên khuôn mặt",
+        }]}
+        quality = next(event for event in events if event["event"] == "face_quality_bad")
+        assert "box" not in quality["payload"]
+        assert "landmarks" not in quality["payload"]
+        assert "quality_metrics" not in quality["payload"]
+
+
 def test_registration_stream_emits_multiple_face_lock_without_quality_good(monkeypatch):
     def inspect(self, _data):
         for track_id in (1, 2):
@@ -168,3 +272,52 @@ def test_registration_stream_emits_multiple_face_lock_without_quality_good(monke
         assert multiple["payload"]["session_id"] == "session-b"
         assert "embedding" not in multiple["payload"]
         assert not any(event["event"] == "face_quality_good" for event in events)
+
+
+def test_registration_second_face_resets_stability_and_single_face_can_restart(monkeypatch):
+    monkeypatch.setattr(runtime.settings, "registration_stable_frames", 2)
+    monkeypatch.setattr(runtime.settings, "registration_stable_ms", 0)
+    clock = iter(index / 10 for index in range(1000, 2000))
+    monkeypatch.setattr(runtime, "monotonic", lambda: next(clock))
+    sequence = [(1,), (1, 2), (1,), (1,)]
+
+    def inspect(self, _data):
+        track_ids = sequence.pop(0)
+        for track_id in track_ids:
+            self.tracks.setdefault(track_id, Track(track_id, (0, 200, 200, 0), 0, 0))
+        return None, [
+            {
+                "track_id": track_id,
+                "quality_ok": True,
+                "box": [0, 200, 200, 0],
+                "guidance": None,
+            }
+            for track_id in track_ids
+        ]
+
+    monkeypatch.setattr(VisionEngine, "inspect", inspect)
+    with TestClient(app) as client, client.websocket_connect(
+        "/api/v1/kiosk/stream", headers={"origin": "http://localhost:5173"}
+    ) as socket:
+        socket.receive_json()
+        socket.send_json({
+            "event": "CONFIGURE",
+            "payload": {"mode": "registration", "session_id": "session-a"},
+        })
+        read_until(socket, "session_state")
+
+        frame_events = []
+        for _ in range(4):
+            socket.send_bytes(b"frame")
+            frame_events.append(read_until(socket, "frame_ready"))
+
+        assert not any(event["event"] == "face_quality_good" for event in frame_events[0])
+        assert any(event["event"] == "multiple_faces_detected" for event in frame_events[1])
+        assert not any(event["event"] == "face_quality_good" for event in frame_events[1])
+        assert not any(event["event"] == "face_quality_good" for event in frame_events[2])
+        good = next(
+            event for event in frame_events[3] if event["event"] == "face_quality_good"
+        )
+        assert good["payload"]["session_id"] == "session-a"
+        assert good["payload"]["stable_frames"] == 2
+        assert "embedding" not in good["payload"]
