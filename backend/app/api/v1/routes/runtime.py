@@ -104,7 +104,8 @@ def confirm(session_id, result):
             occurred_at=datetime.now(UTC)))
         record_event(db, event_type="FACE_RECOGNIZED", session_id=session.id, user_id=user.id,
                      device_id=session.device_id, success=True)
-        payload = {"result": "SUCCESS", "user": _user_data(user), "confidence_score": result.confidence_score, "next_state": "WELCOME"}
+        payload = {"result": "SUCCESS", "user": _user_data(user), "confidence_score": result.confidence_score,
+                   "next_state": "WELCOME", "session_id": str(session.id)}
         db.commit()
         return payload
 
@@ -245,7 +246,7 @@ async def stream(socket: WebSocket):
                                     )
                                 except Exception:
                                     await publisher.publish("recognition_finished", {
-                                        "track_id": track.id, "result": "ERROR",
+                                        "track_id": track.id, "session_id": controller.session_id, "result": "ERROR",
                                         "recognition_ms": round((monotonic() - attempt_started) * 1000, 1),
                                     })
                                     raise
@@ -253,12 +254,15 @@ async def stream(socket: WebSocket):
                                 progress = _recognition_payload(
                                     track.id, result, recognition.metrics
                                 )
+                                progress["session_id"] = controller.session_id
                                 await publisher.publish("recognition_progress", progress)
                                 await publisher.publish("recognition_finished", progress)
                                 if candidate:
-                                    await publisher.publish("identity_candidate", {"track_id": track.id, "confidence": result.confidence_score, "votes": track.votes + 1})
+                                    await publisher.publish("identity_candidate", {"track_id": track.id, "session_id": controller.session_id,
+                                        "confidence": result.confidence_score, "votes": track.votes + 1})
                                 else:
-                                    await publisher.publish("identity_unknown", {"track_id": track.id, "confidence": result.confidence_score})
+                                    await publisher.publish("identity_unknown", {"track_id": track.id, "session_id": controller.session_id,
+                                        "confidence": result.confidence_score})
                                 if track.vote(candidate) and controller.session_id:
                                     controller.offer(result)
                                     await publisher.publish("identity_candidate", {"track_id": track.id, "session_id": controller.session_id, "confidence": result.confidence_score, "votes": track.votes, "confirmed": True})
@@ -285,7 +289,10 @@ async def stream(socket: WebSocket):
                 recognition = RecognitionService()
                 candidates = None
                 presence.reset()
-                await publisher.publish("session_state", {"mode": controller.mode, "session_id": controller.session_id})
+                state_payload = {"mode": controller.mode, "session_id": controller.session_id}
+                if isinstance(payload.get("capture_generation"), int):
+                    state_payload["capture_generation"] = payload["capture_generation"]
+                await publisher.publish("session_state", state_payload)
             elif kind == "confirm_identity":
                 proposal = controller.accept(payload.get("session_id"))
                 if proposal:

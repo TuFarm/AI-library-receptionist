@@ -1,3 +1,19 @@
+function positiveEnvNumber(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export const KIOSK_RECOGNITION = {
+  unknownMinMs: positiveEnvNumber(import.meta.env.VITE_KIOSK_UNKNOWN_MIN_MS, 4000),
+  unknownAttempts: Math.ceil(positiveEnvNumber(import.meta.env.VITE_KIOSK_UNKNOWN_ATTEMPTS, 3)),
+} as const;
+
+export const KIOSK_ENROLLMENT = {
+  capturePreparationMs: positiveEnvNumber(import.meta.env.VITE_KIOSK_CAPTURE_PREPARATION_MS, 1800),
+  stableFrames: Math.ceil(positiveEnvNumber(import.meta.env.VITE_KIOSK_REGISTRATION_STABLE_FRAMES, 5)),
+  stableMs: positiveEnvNumber(import.meta.env.VITE_KIOSK_REGISTRATION_STABLE_MS, 700),
+} as const;
+
 export const KIOSK_TIMING = {
   presenceConfirmationMs: 1200,
   presenceSampleMs: 200,

@@ -2,9 +2,17 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { SuccessAnimation } from "../../components/kiosk/KioskAnimations";
 import { KIOSK_TIMING, wait } from "../../config/kioskRuntime";
 import { useTextToSpeech } from "../../hooks/useTextToSpeech";
-import type { FaceRegistrationFields, KioskUser } from "../../types/kiosk";
-export default function WelcomeScreen({ user, frozenFrameUrl, onContinue, onSave, onReregister, onDeleteFaceId }: {
+import type { FaceRegistrationFields, KioskUser, WelcomeContext } from "../../types/kiosk";
+
+export function welcomeMessage(user: KioskUser | null, context: WelcomeContext | null) {
+  if (context === "new_enrollment" && user) return `Chào mừng ${user.full_name} lần đầu tiên đến với Trợ lý Thư viện AI`;
+  if (context === "reenrollment" && user) return `Face ID của ${user.full_name} đã được đăng ký lại thành công.`;
+  return user ? `Xin chào ${user.full_name}. Chào mừng bạn quay trở lại.` : "Xin chào bạn. Rất vui được gặp bạn.";
+}
+
+export default function WelcomeScreen({ user, welcomeContext, announce = true, frozenFrameUrl, onContinue, onSave, onReregister, onDeleteFaceId }: {
   user: KioskUser | null; frozenFrameUrl?: string | null; onContinue: () => void;
+  welcomeContext: WelcomeContext | null; announce?: boolean;
   onSave: (fields: FaceRegistrationFields) => Promise<KioskUser>;
   onReregister: () => void; onDeleteFaceId: () => Promise<void>;
 }) {
@@ -17,17 +25,17 @@ export default function WelcomeScreen({ user, frozenFrameUrl, onContinue, onSave
   const [busy, setBusy] = useState(false);
   speakRef.current = tts.speak;
   useEffect(() => {
-    if (started.current) return;
+    if (started.current || !announce) return;
     started.current = true;
     let active = true;
     void (async () => {
       await wait(KIOSK_TIMING.welcomeDisplayMs);
       if (!active) return;
-      await speakRef.current(user ? `Xin chào ${user.full_name}. Rất vui được gặp lại bạn.` : "Xin chào bạn. Rất vui được gặp bạn.");
+      await speakRef.current(welcomeMessage(user, welcomeContext));
       await wait(KIOSK_TIMING.postSpeechSilenceMs);
     })();
     return () => { active = false; started.current = false; tts.stop(); };
-  }, []);
+  }, [announce, user, welcomeContext]);
   const beginEdit = () => {
     if (!user) return;
     setFields({ full_name: user.full_name, student_code: user.student_code ?? undefined, email: user.email ?? undefined,
@@ -61,7 +69,9 @@ export default function WelcomeScreen({ user, frozenFrameUrl, onContinue, onSave
     <span className="kiosk-kicker">NHẬN DIỆN THÀNH CÔNG</span>
     <h1>Xin chào</h1>
     <h2>{user?.full_name?.toLocaleUpperCase("vi-VN")}</h2>
-    <p>Chào mừng bạn quay trở lại.</p>
+    <p>{welcomeContext === "new_enrollment" ? `Chào mừng ${user?.full_name ?? "bạn"} lần đầu tiên đến với Trợ lý Thư viện AI`
+      : welcomeContext === "reenrollment" ? "Face ID đã được đăng ký lại thành công."
+      : "Chào mừng bạn quay trở lại."}</p>
     {editing ? <form className="welcome-profile-form" onSubmit={save}>
       <h3>Chỉnh sửa thông tin</h3>
       <div className="wizard-fields">

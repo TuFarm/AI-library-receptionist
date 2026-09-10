@@ -15,6 +15,7 @@ export function initialState(): KioskFlowState {
     cameraStatus: "IDLE", micStatus: "IDLE", lastFaceResult: null, messages: [], currentTranscript: "",
     lastAiResponse: null, selectedBookCategory: null, suggestedBooks: [], survey: null, error: null,
     lastActivityAt: Date.now(), isProcessing: false, mockFallbackActive: false,
+    welcomeContext: null,
   };
 }
 
@@ -26,10 +27,10 @@ export function reducer(state: KioskFlowState, action: KioskAction): KioskFlowSt
       currentState: state.currentState === "CAMERA_PERMISSION" ? "IDLE" : state.currentState, error: null, ...active };
     case "CAMERA_PERMISSION_DENIED": return { ...state, cameraStatus: "DENIED", currentState: "CAMERA_PERMISSION", error: action.error ?? null, ...active };
     case "START_FACE_SCAN": return { ...state, currentState: "CAMERA_PREPARING", error: null, ...active };
-    case "FACE_VERIFY_SUCCESS": if (!["CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING", "UNKNOWN_FACE", "IDENTITY_CONFIRMING"].includes(state.currentState)) return state; return { ...state, lastFaceResult: action.result, user: action.result.user, currentState: "FACE_RECOGNIZED", isProcessing: false, ...active };
+    case "FACE_VERIFY_SUCCESS": if (!["CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING", "UNKNOWN_FACE", "IDENTITY_CONFIRMING"].includes(state.currentState)) return state; return { ...state, lastFaceResult: action.result, user: action.result.user, welcomeContext: "returning", currentState: "FACE_RECOGNIZED", isProcessing: false, ...active };
     case "FACE_VERIFY_UNKNOWN": return { ...state, lastFaceResult: action.result, user: null, currentState: "UNKNOWN_FACE", isProcessing: false, ...active };
     case "FACE_VERIFY_FAILED": return { ...state, error: action.error, currentState: "UNKNOWN_FACE", isProcessing: false, ...active };
-    case "FACE_ENROLL_SUCCESS": if (state.currentState !== "REGISTER_PROCESSING") return state; return { ...state, lastFaceResult: action.result, user: action.result.user, currentState: "REGISTER_SUCCESS", isProcessing: false, ...active };
+    case "FACE_ENROLL_SUCCESS": if (state.currentState !== "REGISTER_PROCESSING") return state; return { ...state, lastFaceResult: action.result, user: action.result.user, welcomeContext: action.welcomeContext, currentState: "REGISTER_SUCCESS", isProcessing: false, ...active };
     case "USER_PROFILE_UPDATED": return { ...state, user: action.user, ...active };
     case "START_CONVERSATION": {
       const greeting: KioskMessage = { id: crypto.randomUUID(), role: "assistant", text: state.user
@@ -117,13 +118,14 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
     dispatch({ type: "TRANSITION", state: "REGISTER_PROCESSING" });
     try {
       const current = stateRef.current;
+      const welcomeContext = current.user ? "reenrollment" as const : "new_enrollment" as const;
       const enrolled = await faceApi.enrollFace({
         sessionId: current.session?.session_id, userId: current.user?.id, deviceCode: current.device.code, imageBlob, fields,
       });
       const result: FaceVerifyResult = {
         result: "SUCCESS", user: enrolled.user, confidence_score: enrolled.quality_score, next_state: "WELCOME",
       };
-      if (currentEpoch === epoch.current) dispatch({ type: "FACE_ENROLL_SUCCESS", result });
+      if (currentEpoch === epoch.current) dispatch({ type: "FACE_ENROLL_SUCCESS", result, welcomeContext });
       return enrolled;
     } catch (reason) {
       if (currentEpoch !== epoch.current) throw reason;
@@ -220,10 +222,6 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
     }
     if (state.currentState === "FACE_RECOGNIZED" || state.currentState === "STOP_CAMERA") {
       const id = window.setTimeout(() => dispatch({ type: "TRANSITION", state: state.currentState === "FACE_RECOGNIZED" ? "STOP_CAMERA" : "WELCOME" }), 100);
-      return () => window.clearTimeout(id);
-    }
-    if (state.currentState === "REGISTER_SUCCESS") {
-      const id = window.setTimeout(() => dispatch({ type: "TRANSITION", state: "WELCOME" }), KIOSK_TIMING.registrationSuccessMs);
       return () => window.clearTimeout(id);
     }
     if (state.currentState === "THANK_YOU") {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canActivateMicrophone, canStartFaceVerification, KIOSK_TIMING } from "./kioskRuntime";
+import { canActivateMicrophone, canStartFaceVerification, KIOSK_ENROLLMENT, KIOSK_RECOGNITION, KIOSK_TIMING } from "./kioskRuntime";
 import { hasLiveVideoTrack, isVideoFrameReady } from "./cameraRuntime";
 import { initialState, reducer } from "../hooks/useKioskFlow";
 
@@ -18,7 +18,9 @@ describe("production kiosk state machine", () => {
     const unknown = { result: "UNKNOWN_FACE", user: null, confidence_score: .2, next_state: "FACE_UNKNOWN" as const };
     expect(reducer(base, { type: "FACE_VERIFY_SUCCESS", result: success }).currentState).toBe("FACE_RECOGNIZED");
     expect(reducer(base, { type: "FACE_VERIFY_UNKNOWN", result: unknown }).currentState).toBe("UNKNOWN_FACE");
-    expect(reducer({ ...base, currentState: "REGISTER_PROCESSING" }, { type: "FACE_ENROLL_SUCCESS", result: success }).currentState).toBe("REGISTER_SUCCESS");
+    const enrolled = reducer({ ...base, currentState: "REGISTER_PROCESSING" }, { type: "FACE_ENROLL_SUCCESS", result: success, welcomeContext: "new_enrollment" });
+    expect(enrolled.currentState).toBe("REGISTER_SUCCESS");
+    expect(enrolled.welcomeContext).toBe("new_enrollment");
   });
 
   it("prevents duplicate verification during a request and during cooldown", () => {
@@ -39,6 +41,8 @@ describe("production kiosk state machine", () => {
     expect(KIOSK_TIMING.presenceConfirmationMs).toBe(1200);
     expect(KIOSK_TIMING.welcomeDisplayMs).toBe(2500);
     expect(KIOSK_TIMING.thankYouMs).toBe(3000);
+    expect(KIOSK_RECOGNITION).toEqual({ unknownMinMs: 4000, unknownAttempts: 3 });
+    expect(KIOSK_ENROLLMENT.capturePreparationMs).toBe(1800);
   });
 
   it("does not lose camera readiness when a preview element changes", () => {

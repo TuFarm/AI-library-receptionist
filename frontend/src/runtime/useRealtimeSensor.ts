@@ -5,9 +5,9 @@ import type { FaceVerifyResult } from "../types/kiosk";
 import { kioskEvents } from "./eventBus";
 import { RuntimeEvent as Events } from "./events";
 import { kioskStream } from "./stream";
-import { isDeveloperControlsEnabled } from "../config/developerControls";
+import { KIOSK_ENROLLMENT, KIOSK_RECOGNITION } from "../config/kioskRuntime";
 import { EnrollmentEvidenceGuard } from "./enrollmentEvidence";
-import { FaceLatencyBenchmark } from "./latencyBenchmark";
+import { UnknownRecognitionGuard, type UnknownRecognitionContext } from "./recognitionUnknown";
 
 const sensingStates = new Set(["CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING", "UNKNOWN_FACE", "REGISTER"]);
 export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera: ReturnType<typeof useCamera>) {
@@ -16,24 +16,87 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
   const [qualityReady, setQualityReady] = useState(false);
   const [faceCount, setFaceCount] = useState(0);
   const [multipleFacesDetected, setMultipleFacesDetected] = useState(false);
-  const [diagnostics, setDiagnostics] = useState<Record<string, unknown>>({});
+  const [captureGeneration, setCaptureGeneration] = useState(0);
+  const [capturePrepared, setCapturePrepared] = useState(false);
+  const [captureCountdown, setCaptureCountdown] = useState(3);
   const [frozenFrameUrl, setFrozenFrameUrl] = useState<string | null>(null);
   const starting = useRef(false);
   const sentFrame = useRef<Blob | null>(null);
   const enrollmentEvidence = useRef(new EnrollmentEvidenceGuard());
+  const unknownRecognition = useRef(new UnknownRecognitionGuard(KIOSK_RECOGNITION.unknownMinMs, KIOSK_RECOGNITION.unknownAttempts));
+  const unknownTimer = useRef<number | undefined>(undefined);
+  const identityPendingRef = useRef(false);
+  const confirmationSessionRef = useRef<string | null>(null);
+  const captureActiveRef = useRef(false);
+  const captureGenerationRef = useRef(0);
+  const captureStartedAtRef = useRef<number | null>(null);
   const faceCountRef = useRef(0);
+  const qualityReadyRef = useRef(false);
+  const multipleFacesDetectedRef = useRef(false);
   const trackIdRef = useRef<number | null>(null);
   const frozenUrlRef = useRef<string | null>(null);
-  const latencyBenchmark = useRef(new FaceLatencyBenchmark());
-  const stableRecognitionAt = useRef<number | null>(null);
-  const latestVisionMetrics = useRef<Record<string, unknown>>({});
-  const latestRecognitionMetrics = useRef<Record<string, unknown>>({});
-  const latestRecognitionFrameSentAt = useRef<number | null>(null);
   const state = flow.currentState;
   const sensing = sensingStates.has(state);
   const registration = state === "REGISTER" || state === "REGISTER_PROCESSING";
   const externalPresence = Boolean(window.kiosk?.onPresence);
   const idleCamera = false;
+
+  const resetUnknownRecognition = () => {
+    window.clearTimeout(unknownTimer.current);
+    unknownTimer.current = undefined;
+    identityPendingRef.current = false;
+    unknownRecognition.current.reset();
+  };
+  const updateQualityReady = (ready: boolean) => {
+    qualityReadyRef.current = ready;
+    setQualityReady(ready);
+  };
+
+  const recognitionContext = (f: ReturnType<typeof useKioskFlow>): UnknownRecognitionContext => ({
+    sessionId: f.session?.session_id,
+    trackId: trackIdRef.current,
+    faceCount: faceCountRef.current,
+    qualityReady: qualityReadyRef.current,
+    recognitionActive: ["CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING"].includes(f.currentState),
+    identityPending: identityPendingRef.current || f.currentState === "IDENTITY_CONFIRMING",
+  });
+
+  const restartEnrollmentCapture = () => {
+    const f = current.current.flow;
+    if (!captureActiveRef.current || f.currentState !== "REGISTER") return;
+    sentFrame.current = null;
+    faceCountRef.current = 0;
+    trackIdRef.current = null;
+    updateQualityReady(false);
+    setFaceCount(0);
+    setCapturePrepared(false);
+    setCaptureCountdown(3);
+    const now = performance.now();
+    captureStartedAtRef.current = now;
+    captureGenerationRef.current = enrollmentEvidence.current.beginCapture(f.session?.session_id, now);
+    setCaptureGeneration(captureGenerationRef.current);
+    kioskStream.configure({ mode: "registration", session_id: f.session?.session_id,
+      capture_generation: captureGenerationRef.current });
+  };
+
+  const beginEnrollmentCapture = () => {
+    captureActiveRef.current = true;
+    multipleFacesDetectedRef.current = false;
+    setMultipleFacesDetected(false);
+    restartEnrollmentCapture();
+  };
+
+  const endEnrollmentCapture = () => {
+    captureActiveRef.current = false;
+    captureStartedAtRef.current = null;
+    sentFrame.current = null;
+    enrollmentEvidence.current.endCapture();
+    captureGenerationRef.current = enrollmentEvidence.current.currentGeneration();
+    setCaptureGeneration(captureGenerationRef.current);
+    setCapturePrepared(false);
+    setCaptureCountdown(3);
+    updateQualityReady(false);
+  };
 
   useEffect(() => {
     if (state === "IDLE" && frozenUrlRef.current) {
@@ -47,8 +110,10 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
     let absenceTimer: number | undefined;
     const unsubscribe = kioskEvents.subscribe(({ event, payload }) => {
       const { flow: f, camera: c } = current.current;
-      if (event === Events.registrationRequested && f.currentState === "UNKNOWN_FACE") f.transitionTo("REGISTER");
-      if (event === Events.identityUnknown && f.currentState === "REGISTER") f.transitionTo("UNKNOWN_FACE");
+      if (event === Events.registrationRequested && f.currentState === "UNKNOWN_FACE") {
+        resetUnknownRecognition();
+        f.transitionTo("REGISTER");
+      }
       if (event === Events.faceDetected || event === Events.presenceDetected) { window.clearTimeout(absenceTimer); absenceTimer = undefined; }
       if (event === Events.presenceLost && absenceTimer === undefined && ["CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING", "UNKNOWN_FACE"].includes(f.currentState)) {
         absenceTimer = window.setTimeout(() => {
@@ -56,23 +121,43 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
           absenceTimer = undefined;
         }, 8000);
       }
-      if (event === Events.faceQualityGood && f.currentState === "REGISTER" && sentFrame.current &&
-          payload.session_id === f.session?.session_id && faceCountRef.current === 1) {
-        enrollmentEvidence.current.accept(sentFrame.current, String(payload.session_id), Number(payload.track_id), performance.now());
-        setQualityReady(true);
+      if (event === Events.sessionState && captureActiveRef.current && payload.mode === "registration" &&
+          payload.session_id === f.session?.session_id && Number(payload.capture_generation) === captureGenerationRef.current) {
+        enrollmentEvidence.current.acknowledge(captureGenerationRef.current, f.session?.session_id);
       }
-      if (isDeveloperControlsEnabled && event === Events.faceQualityGood && f.currentState !== "REGISTER" && stableRecognitionAt.current === null) {
-        stableRecognitionAt.current = performance.now();
+      if (event === Events.faceQualityGood && f.currentState === "REGISTER" && captureActiveRef.current && sentFrame.current &&
+          payload.session_id === f.session?.session_id && faceCountRef.current === 1 && trackIdRef.current === Number(payload.track_id)) {
+        const accepted = enrollmentEvidence.current.accept(sentFrame.current, {
+          sessionId: String(payload.session_id), trackId: Number(payload.track_id), now: performance.now(),
+          generation: captureGenerationRef.current, faceCount: faceCountRef.current,
+          multipleFacesDetected: false, qualityReady: true,
+          stableFrames: Number(payload.stable_frames), stableMs: Number(payload.stable_ms),
+          requiredStableFrames: KIOSK_ENROLLMENT.stableFrames, requiredStableMs: KIOSK_ENROLLMENT.stableMs,
+        });
+        updateQualityReady(accepted);
+      } else if (event === Events.faceQualityGood && f.currentState !== "REGISTER" &&
+          ["CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING"].includes(f.currentState) &&
+          faceCountRef.current === 1 && trackIdRef.current === Number(payload.track_id)) {
+        updateQualityReady(true);
       }
       if (event === Events.multipleFacesDetected && f.currentState === "REGISTER" && payload.session_id === f.session?.session_id) {
-        enrollmentEvidence.current.invalidate();
+        const wasMultiple = multipleFacesDetectedRef.current;
+        enrollmentEvidence.current.invalidateEvidence();
         sentFrame.current = null;
         trackIdRef.current = null;
         faceCountRef.current = Number(payload.face_count) || 2;
         setFaceCount(faceCountRef.current);
+        multipleFacesDetectedRef.current = true;
         setMultipleFacesDetected(true);
-        setQualityReady(false);
+        updateQualityReady(false);
         setGuidance(String(payload.guidance));
+        if (captureActiveRef.current && !wasMultiple) restartEnrollmentCapture();
+      }
+      if (event === Events.identityCandidate && f.currentState !== "REGISTER" &&
+          payload.session_id === f.session?.session_id && Number(payload.track_id) === trackIdRef.current) {
+        identityPendingRef.current = true;
+        unknownRecognition.current.markCandidate(f.session?.session_id, trackIdRef.current);
+        window.clearTimeout(unknownTimer.current);
       }
       if (event === Events.identityCandidate && payload.confirmed === true && sensingStates.has(f.currentState) && f.currentState !== "REGISTER" && payload.session_id === f.session?.session_id) {
         if (sentFrame.current) {
@@ -81,6 +166,7 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
           setFrozenFrameUrl(frozenUrlRef.current);
         }
         c.stopCamera();
+        confirmationSessionRef.current = f.session?.session_id ?? null;
         kioskStream.send("confirm_identity", { session_id: f.session?.session_id });
         f.transitionTo("IDENTITY_CONFIRMING");
       }
@@ -92,65 +178,64 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
       if (event === Events.faceTracking) {
         if (["CAMERA_PREPARING", "FACE_RECOGNIZING"].includes(f.currentState)) f.transitionTo("FACE_TRACKING");
         const faces = payload.faces as { track_id: number; quality_ok: boolean; guidance: string | null }[];
+        const wasMultiple = multipleFacesDetectedRef.current;
         const nextTrackId = faces.length === 1 ? faces[0].track_id : null;
         if (trackIdRef.current !== nextTrackId) {
-          enrollmentEvidence.current.invalidate();
-          setQualityReady(false);
+          enrollmentEvidence.current.invalidateEvidence();
+          resetUnknownRecognition();
+          updateQualityReady(false);
         }
         trackIdRef.current = nextTrackId;
         faceCountRef.current = faces.length;
         setFaceCount(faces.length);
         if (faces.length !== 1 || !faces[0].quality_ok) {
-          enrollmentEvidence.current.invalidate();
+          enrollmentEvidence.current.invalidateEvidence();
+          resetUnknownRecognition();
           if (faces.length !== 1) sentFrame.current = null;
-          setQualityReady(false);
+          updateQualityReady(false);
         }
-        setMultipleFacesDetected(faces.length >= 2);
+        multipleFacesDetectedRef.current = faces.length >= 2;
+        setMultipleFacesDetected(multipleFacesDetectedRef.current);
         setGuidance(faces.length >= 2 ? "Phát hiện nhiều khuôn mặt. Vui lòng chỉ để một người xuất hiện trong khung hình."
           : faces[0]?.guidance ?? (faces.length ? "Đang kiểm tra độ ổn định…" : "Vui lòng đưa khuôn mặt vào camera"));
-        if (isDeveloperControlsEnabled) {
-          setDiagnostics(d => ({ ...d, faces, vision: payload.metrics }));
-          latestVisionMetrics.current = payload.metrics as Record<string, unknown>;
+        if (captureActiveRef.current && wasMultiple && faces.length === 1) restartEnrollmentCapture();
+      }
+      if (event === Events.recognitionFinished && payload.session_id === f.session?.session_id &&
+          ["CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING"].includes(f.currentState)) {
+        const now = performance.now();
+        identityPendingRef.current = false;
+        const context = recognitionContext(f);
+        const ready = unknownRecognition.current.observe(payload.result, context, now);
+        const declareUnknown = () => {
+          const activeFlow = current.current.flow;
+          if (!unknownRecognition.current.isReady(recognitionContext(activeFlow), performance.now())) return;
+          resetUnknownRecognition();
+          kioskEvents.publish(Events.identityUnknown, { session_id: activeFlow.session?.session_id });
+          activeFlow.transitionTo("UNKNOWN_FACE");
+        };
+        if (ready) declareUnknown();
+        else {
+          const delay = unknownRecognition.current.delayUntilEligible(now);
+          window.clearTimeout(unknownTimer.current);
+          if (delay !== null) unknownTimer.current = window.setTimeout(declareUnknown, delay);
         }
       }
-      if (event === Events.pong && isDeveloperControlsEnabled) void window.kiosk?.getDiagnostics?.().then(electron => setDiagnostics(d => ({ ...d, electron })));
-      if (isDeveloperControlsEnabled && [Events.frameReady, Events.recognitionProgress, Events.recognitionFinished, Events.transportLatency].includes(event as never)) setDiagnostics(d => ({ ...d, [event]: payload }));
-      if (isDeveloperControlsEnabled && event === Events.recognitionFinished && kioskStream.lastFrameSentAt !== null) {
-        latestRecognitionFrameSentAt.current = kioskStream.lastFrameSentAt;
-        latestRecognitionMetrics.current = payload;
-      }
-      if (isDeveloperControlsEnabled && event === Events.identityConfirmed &&
-          latestRecognitionFrameSentAt.current !== null && stableRecognitionAt.current !== null) {
-        const sentAt = latestRecognitionFrameSentAt.current;
-        const stableAt = stableRecognitionAt.current;
-        const visionMetrics = latestVisionMetrics.current;
-        const recognitionMetrics = latestRecognitionMetrics.current;
-        window.requestAnimationFrame(() => {
-          latencyBenchmark.current.add({
-            decode_ms: Number(visionMetrics.decode_ms),
-            detection_ms: Number(visionMetrics.detection_ms),
-            quality_tracking_ms: Number(visionMetrics.quality_tracking_ms),
-            embedding_ms: Number(recognitionMetrics.embedding_ms),
-            profile_query_ms: Number(recognitionMetrics.profile_query_ms),
-            search_ms: Number(recognitionMetrics.search_ms),
-            websocket_ui_round_trip_ms: performance.now() - sentAt,
-            total_ms: performance.now() - stableAt,
-          });
-          setDiagnostics(d => ({ ...d, faceLatencyBenchmark: latencyBenchmark.current.summary() }));
-          stableRecognitionAt.current = null;
-          latestRecognitionFrameSentAt.current = null;
-          latestRecognitionMetrics.current = {};
-        });
-      }
-      if (event === Events.identityConfirmed && (sensingStates.has(f.currentState) || f.currentState === "IDENTITY_CONFIRMING") && f.currentState !== "REGISTER") {
+      if (event === Events.identityConfirmed && f.currentState === "IDENTITY_CONFIRMING" &&
+          confirmationSessionRef.current === f.session?.session_id &&
+          payload.session_id === confirmationSessionRef.current) {
         // Stop physical tracks before publishing the UI identity transition.
+        resetUnknownRecognition();
+        confirmationSessionRef.current = null;
         c.stopCamera();
         kioskStream.configure({ mode: "conversation", session_id: f.session?.session_id });
         f.dispatch({ type: "FACE_VERIFY_SUCCESS", result: payload as FaceVerifyResult });
       }
       if (event === Events.streamError || event === Events.streamDisconnected) {
-        enrollmentEvidence.current.invalidate();
-        setQualityReady(false);
+        resetUnknownRecognition();
+        confirmationSessionRef.current = null;
+        if (captureActiveRef.current) restartEnrollmentCapture();
+        else enrollmentEvidence.current.endCapture();
+        updateQualityReady(false);
         setGuidance(event === Events.streamError ? String(payload.message) : "Đang kết nối lại với trợ lý…");
         if (f.currentState === "IDENTITY_CONFIRMING") f.dispatch({ type: "SET_ERROR", error: "Xác nhận bị gián đoạn. Vui lòng bắt đầu phiên mới." });
       }
@@ -163,7 +248,8 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
       else kioskEvents.publish(Events.presenceLost);
     });
     return () => {
-      unsubscribe(); stopPresence?.(); window.clearTimeout(presenceTimer); window.clearTimeout(absenceTimer); kioskStream.close();
+      unsubscribe(); stopPresence?.(); window.clearTimeout(presenceTimer); window.clearTimeout(absenceTimer);
+      window.clearTimeout(unknownTimer.current); kioskStream.close();
       if (frozenUrlRef.current) URL.revokeObjectURL(frozenUrlRef.current);
     };
   }, []);
@@ -174,23 +260,26 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
     return () => window.clearTimeout(timer);
   }, [state]);
   useEffect(() => {
-    enrollmentEvidence.current.invalidate();
-    stableRecognitionAt.current = null;
-    latestRecognitionFrameSentAt.current = null;
-    latestRecognitionMetrics.current = {};
+    resetUnknownRecognition();
+    if (state !== "IDENTITY_CONFIRMING") confirmationSessionRef.current = null;
+    enrollmentEvidence.current.endCapture();
+    captureActiveRef.current = false;
+    captureStartedAtRef.current = null;
+    captureGenerationRef.current = enrollmentEvidence.current.currentGeneration();
     faceCountRef.current = 0;
+    multipleFacesDetectedRef.current = false;
     trackIdRef.current = null;
     setFaceCount(0);
     setMultipleFacesDetected(false);
-    setQualityReady(false);
-    kioskStream.configure({ mode: registration ? "registration" : sensing ? "recognition" : state === "IDLE" ? "idle" : "conversation", session_id: flow.session?.session_id });
+    updateQualityReady(false);
+    const mode = registration ? "registration" : (sensing || state === "IDENTITY_CONFIRMING") ? "recognition" : state === "IDLE" ? "idle" : "conversation";
+    kioskStream.configure({ mode, session_id: flow.session?.session_id });
   }, [registration, sensing, state === "IDLE", flow.session?.session_id]);
 
   useEffect(() => {
-    if (!sensing && !idleCamera) { sentFrame.current = null; enrollmentEvidence.current.invalidate(); camera.stopCamera(); return; }
+    if (!sensing && !idleCamera) { sentFrame.current = null; enrollmentEvidence.current.invalidateEvidence(); camera.stopCamera(); return; }
     let active = true;
     let timer: number;
-    let frames = 0; const started = performance.now();
     const sample = async () => {
       if (!active) return;
       try {
@@ -198,10 +287,6 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
           const blob = await camera.captureFrame();
           if (active && kioskStream.frame(blob)) {
             sentFrame.current = blob;
-            frames++;
-            if (isDeveloperControlsEnabled) {
-              setDiagnostics(d => ({ ...d, fps: frames * 1000 / (performance.now()-started) }));
-            }
           }
         }
       } catch { /* Track loss is reported by the camera adapter; never queue frames. */ }
@@ -212,24 +297,34 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
       if (ok) { kioskEvents.publish(Events.cameraReady); kioskStream.send(Events.cameraReady); void sample(); }
       else { setGuidance("Camera chưa sẵn sàng. Vui lòng kiểm tra quyền truy cập."); timer = window.setTimeout(() => { if (active) void camera.requestCamera().then(ready => { if (active && ready) void sample(); }); }, 1500); }
     });
-    return () => { active = false; sentFrame.current = null; enrollmentEvidence.current.invalidate(); window.clearTimeout(timer); camera.stopCamera(); kioskEvents.publish(Events.cameraStopped); };
+    return () => { active = false; sentFrame.current = null; enrollmentEvidence.current.invalidateEvidence(); window.clearTimeout(timer); camera.stopCamera(); kioskEvents.publish(Events.cameraStopped); };
   }, [sensing, idleCamera, camera.requestCamera, camera.stopCamera, camera.captureFrame]);
 
   useEffect(() => {
-    if (!sensing || registration) return;
-    const timer = window.setTimeout(() => {
-      kioskEvents.publish(Events.identityUnknown); current.current.flow.transitionTo("UNKNOWN_FACE");
-    }, 20000);
-    return () => window.clearTimeout(timer);
-  }, [sensing, registration]);
+    if (!captureActiveRef.current || state !== "REGISTER" || captureStartedAtRef.current === null) return;
+    const updatePreparation = () => {
+      const elapsed = performance.now() - captureStartedAtRef.current!;
+      const remaining = Math.max(0, KIOSK_ENROLLMENT.capturePreparationMs - elapsed);
+      setCaptureCountdown(Math.max(1, Math.ceil(remaining / (KIOSK_ENROLLMENT.capturePreparationMs / 3))));
+      setCapturePrepared(remaining === 0);
+    };
+    updatePreparation();
+    const timer = window.setInterval(updatePreparation, 100);
+    return () => window.clearInterval(timer);
+  }, [captureGeneration, state]);
+
   const captureEnrollmentFrame = async () => {
     return enrollmentEvidence.current.capture(
       current.current.flow.session?.session_id,
-      current.current.flow.currentState === "REGISTER",
+      captureGenerationRef.current,
+      KIOSK_ENROLLMENT.capturePreparationMs,
       faceCountRef.current,
       trackIdRef.current,
+      multipleFacesDetectedRef.current,
       performance.now(),
     );
   };
-  return { guidance, qualityReady, faceCount, multipleFacesDetected, diagnostics, sensing, externalPresence, captureEnrollmentFrame, frozenFrameUrl };
+  return { guidance, qualityReady, faceCount, multipleFacesDetected, sensing, externalPresence,
+    captureEnrollmentFrame, beginEnrollmentCapture, endEnrollmentCapture, captureGeneration, capturePrepared,
+    captureCountdown, frozenFrameUrl };
 }

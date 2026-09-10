@@ -13,6 +13,7 @@ export const RuntimeEvent = {
   aiListeningStarted: "ai_listening_started", aiListeningStopped: "ai_listening_stopped",
   aiSpeakingStarted: "ai_speaking_started", aiSpeakingFinished: "ai_speaking_finished",
   streamReady: "stream_ready", frameReady: "frame_ready",
+  sessionState: "session_state",
   streamDisconnected: "stream_disconnected", streamError: "stream_error",
   pong: "pong", transportLatency: "transport_latency",
   aiProcessingStarted: "ai_processing_started", aiProcessingFinished: "ai_processing_finished",

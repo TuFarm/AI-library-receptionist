@@ -82,16 +82,6 @@
 @keyframes assistant-error { 50% { opacity: .55; filter: saturate(.4); } }
 .kiosk-dev-panel pre { max-height: 240px; overflow: auto; font-size: 11px; text-align: left; }
 @media (prefers-reduced-motion: reduce) { .assistant-avatar-runtime { animation: none !important; } }
-.tracking-diagnostics { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:4; }
-.tracking-face { stroke:#50efab; stroke-width:3; }
-.tracking-diagnostics.developer .tracking-face.waiting { stroke:#f3c15d; }
-.tracking-box { rx:18; filter:drop-shadow(0 0 8px currentColor); }
-.tracking-pulse { rx:22; opacity:.55; animation:tracking-pulse 1.5s ease-out infinite; transform-box:fill-box; transform-origin:center; }
-.tracking-landmark { fill:#7ff7c0; stroke:none; opacity:.78; }
-.confidence-base { stroke:#ffffff35; stroke-width:6; fill:#06152ecc; }
-.confidence-progress { stroke:#55edaa; stroke-width:6; stroke-linecap:round; transform:rotate(-90deg); transform-box:fill-box; transform-origin:center; transition:stroke-dasharray .25s ease; }
-.tracking-face text { fill:#fff; stroke:none; font-size:18px; font-weight:700; paint-order:stroke; }
-@keyframes tracking-pulse { from { opacity:.7; transform:scale(.97); } to { opacity:0; transform:scale(1.08); } }
 @media(max-width:900px) { .recognition-stage,.welcome-experience { grid-template-columns:1fr; overflow:auto; padding:12px 0 28px; } .recognition-camera .camera-preview { height:48vh; min-height:300px; } .recognition-copy { align-items:center; text-align:center; } .welcome-frozen-frame { max-height:42vh; } }
 .assistant-avatar-runtime.listening { animation: assistant-listen 1.5s ease-in-out infinite; }
 .assistant-avatar-runtime.greeting { animation: assistant-greet 1.8s ease-in-out infinite; }
@@ -105,3 +95,11 @@
 .profile-actions { justify-content:center; }
 .kiosk-danger { background:#a72f42!important; color:#fff!important; }
 .profile-success { padding:10px 14px; border-radius:10px; background:#167653; color:#fff; }
+.face-frame{transition:border-color .25s ease,box-shadow .25s ease,opacity .25s ease}
+.face-frame.face-guide-neutral{border-color:#90a3bd;box-shadow:0 0 24px #90a3bd24;opacity:.48}
+.face-frame.face-guide-analyzing,.face-frame.face-guide-unknown{border-color:#f0a33a;box-shadow:0 0 34px #f0a33a66;color:#ffd08a;animation:face-guide-pulse 1.6s ease-in-out infinite}
+.face-frame.face-guide-ready{border-color:#ffb84d;box-shadow:0 0 42px #ffad3d99;color:#fff0c8}
+.face-frame.face-guide-multiple{border-color:#ff5d6c;box-shadow:0 0 38px #ff435577;color:#ffc2c8;animation:none}
+.face-frame.face-guide-neutral .scan-line,.face-frame.face-guide-multiple .scan-line{display:none}
+@keyframes face-guide-pulse{50%{opacity:.72;box-shadow:0 0 52px #f0a33a99}}
+@media(prefers-reduced-motion:reduce){.face-frame{animation:none!important}}

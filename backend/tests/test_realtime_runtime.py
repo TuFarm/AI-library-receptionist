@@ -159,6 +159,21 @@ def test_stream_rejects_foreign_origin():
                 pass
 
 
+def test_registration_config_echoes_capture_generation():
+    with TestClient(app) as client, client.websocket_connect(
+        "/api/v1/kiosk/stream", headers={"origin": "http://localhost:5173"}
+    ) as socket:
+        assert socket.receive_json()["event"] == "stream_ready"
+        socket.send_json({"event": "CONFIGURE", "payload": {
+            "mode": "registration", "session_id": "session-a", "capture_generation": 7,
+        }})
+        state = socket.receive_json()
+        assert state["event"] == "session_state"
+        assert state["payload"] == {
+            "mode": "registration", "session_id": "session-a", "capture_generation": 7,
+        }
+
+
 def read_until(socket, event):
     events = []
     for _ in range(20):
@@ -194,6 +209,7 @@ def test_confirmation_requires_three_frames_and_client_acceptance(monkeypatch):
         for index in range(3):
             socket.send_bytes(b"frame")
             events = read_until(socket, "frame_ready")
+            assert next(e for e in events if e["event"] == "recognition_finished")["payload"]["session_id"] == "test"
             assert any(e["event"] == "identity_candidate" and e["payload"].get("confirmed") for e in events) == (index == 2)
             assert not confirmations
         socket.send_json({"event": "confirm_identity", "payload": {"session_id": "test"}})

@@ -10,6 +10,7 @@ export type CameraStatus = "IDLE" | "REQUESTING" | "READY" | "DENIED" | "ERROR" 
 export type MicStatus = "IDLE" | "LISTENING" | "PROCESSING" | "DENIED" | "UNSUPPORTED" | "ERROR";
 export type MessageInputMethod = "TEXT" | "VOICE";
 export type VoiceState = "VOICE_IDLE" | "LISTENING" | "USER_SPEAKING" | "TRANSCRIBING" | "PROCESSING_AI" | "AI_SPEAKING" | "VOICE_ERROR";
+export type WelcomeContext = "returning" | "new_enrollment" | "reenrollment";
 
 export type KioskUser = {
   id: string; student_code: string | null; full_name: string; email?: string | null; phone?: string | null;
@@ -44,6 +45,7 @@ export type KioskFlowState = {
   lastFaceResult: FaceVerifyResult | null; messages: KioskMessage[]; currentTranscript: string;
   lastAiResponse: string | null; selectedBookCategory: string | null; suggestedBooks: SuggestedBook[];
   survey: ActiveSurvey | null; error: string | null; lastActivityAt: number; isProcessing: boolean; mockFallbackActive: boolean;
+  welcomeContext: WelcomeContext | null;
 };
 
 export type KioskAction =
@@ -51,7 +53,7 @@ export type KioskAction =
   | { type: "CAMERA_PERMISSION_GRANTED" } | { type: "CAMERA_PERMISSION_DENIED"; error?: string }
   | { type: "START_FACE_SCAN" } | { type: "FACE_VERIFY_SUCCESS"; result: FaceVerifyResult }
   | { type: "FACE_VERIFY_UNKNOWN"; result: FaceVerifyResult } | { type: "FACE_VERIFY_FAILED"; error: string }
-  | { type: "FACE_ENROLL_SUCCESS"; result: FaceVerifyResult }
+  | { type: "FACE_ENROLL_SUCCESS"; result: FaceVerifyResult; welcomeContext: "new_enrollment" | "reenrollment" }
   | { type: "USER_PROFILE_UPDATED"; user: KioskUser }
   | { type: "START_CONVERSATION"; conversation: KioskConversation }
   | { type: "USER_MESSAGE_SUBMITTED"; message: KioskMessage }
