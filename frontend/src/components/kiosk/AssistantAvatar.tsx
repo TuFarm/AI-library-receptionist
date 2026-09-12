@@ -1,7 +1,7 @@
 import { useEffect, useState, type ComponentType } from "react";
 import { kioskEvents } from "../../runtime/eventBus";
 import { RuntimeEvent as Events } from "../../runtime/events";
-export type AssistantMood = "idle" | "greeting" | "listening" | "thinking" | "speaking" | "happy" | "unknown" | "goodbye" | "error";
+export type AssistantMood = "idle" | "greeting" | "focused" | "listening" | "thinking" | "speaking" | "happy" | "unknown" | "goodbye" | "error";
 export type AvatarProps = { mood?: AssistantMood; label?: string };
 // Renderers receive presentation state only: Live2D/ThreeJS can replace this skin.
 export function AssistantAvatar({ mood: controlledMood, label = "Trợ lý AI", renderer: Renderer }: AvatarProps & { renderer?: ComponentType<AvatarProps> }) {

@@ -1,15 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { useCamera } from "../hooks/useCamera";
 import type { useKioskFlow } from "../hooks/useKioskFlow";
 import type { FaceGuideRect, FaceVerifyResult } from "../types/kiosk";
 import { kioskEvents } from "./eventBus";
 import { RuntimeEvent as Events } from "./events";
 import { kioskStream } from "./stream";
-import { KIOSK_ENROLLMENT, KIOSK_RECOGNITION } from "../config/kioskRuntime";
+import { KIOSK_ENROLLMENT, KIOSK_RECOGNITION, KIOSK_TIMING } from "../config/kioskRuntime";
 import { EnrollmentEvidenceGuard } from "./enrollmentEvidence";
 import { UnknownRecognitionGuard, type UnknownRecognitionContext } from "./recognitionUnknown";
+import { useVisualDetection } from "../hooks/useVisualDetection";
+import { WakeUpGate, type WakeSource } from "./kioskWakeUp";
 
 const sensingStates = new Set(["CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING", "UNKNOWN_FACE", "REGISTER"]);
+export function isFaceFrameState(state: string) { return sensingStates.has(state); }
+const localMotionStates = new Set(["IDLE", "PRESENCE_DETECTED", "WAKE_UP", "GREETING", "CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING", "UNKNOWN_FACE"]);
 export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera: ReturnType<typeof useCamera>) {
   const current = useRef({ flow, camera }); current.current = { flow, camera };
   const [guidance, setGuidance] = useState("Vui lòng nhìn vào camera");
@@ -21,7 +25,9 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
   const [capturePrepared, setCapturePrepared] = useState(false);
   const [captureCountdown, setCaptureCountdown] = useState(3);
   const [frozenFrameUrl, setFrozenFrameUrl] = useState<string | null>(null);
-  const starting = useRef(false);
+  const wakeGate = useRef(new WakeUpGate());
+  const absenceTimerRef = useRef<number | undefined>(undefined);
+  const lastPresenceEvidenceAtRef = useRef<number | null>(null);
   const sentFrame = useRef<Blob | null>(null);
   const enrollmentEvidence = useRef(new EnrollmentEvidenceGuard());
   const unknownRecognition = useRef(new UnknownRecognitionGuard(KIOSK_RECOGNITION.unknownMinMs, KIOSK_RECOGNITION.unknownAttempts));
@@ -37,10 +43,50 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
   const trackIdRef = useRef<number | null>(null);
   const frozenUrlRef = useRef<string | null>(null);
   const state = flow.currentState;
-  const sensing = sensingStates.has(state);
+  const sensing = isFaceFrameState(state);
   const registration = state === "REGISTER" || state === "REGISTER_PROCESSING";
-  const externalPresence = Boolean(window.kiosk?.onPresence);
-  const idleCamera = false;
+
+  const armAbsenceTimeout = useCallback(() => {
+    const f = current.current.flow;
+    if (f.currentState === "IDLE") return;
+    lastPresenceEvidenceAtRef.current = performance.now();
+    window.clearTimeout(absenceTimerRef.current);
+    absenceTimerRef.current = window.setTimeout(() => {
+      const activeFlow = current.current.flow;
+      const lastEvidence = lastPresenceEvidenceAtRef.current;
+      if (lastEvidence !== null && performance.now() - lastEvidence >= KIOSK_TIMING.presenceAbsenceMs &&
+          ["PRESENCE_DETECTED", "WAKE_UP", "GREETING", "CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING", "UNKNOWN_FACE"].includes(activeFlow.currentState)) {
+        kioskEvents.publish(Events.presenceLost);
+        void activeFlow.resetToIdle("PRESENCE_LOST");
+      }
+    }, KIOSK_TIMING.presenceAbsenceMs);
+  }, []);
+
+  const wakeUp = useCallback((source: WakeSource) => {
+    const f = current.current.flow;
+    if (!wakeGate.current.tryAcquire(f.currentState === "IDLE", performance.now())) return false;
+    kioskEvents.publish(Events.presenceDetected, { source });
+    void f.startSession().finally(() => wakeGate.current.release());
+    return true;
+  }, []);
+
+  useVisualDetection(camera.sensingVideo, localMotionStates.has(state) ? "idle" : "off", {
+    onActivity: armAbsenceTimeout,
+    onPresence: () => wakeUp("motion"),
+    onPresenceLost: () => {
+      const lastEvidence = lastPresenceEvidenceAtRef.current;
+      if (lastEvidence !== null && performance.now() - lastEvidence >= KIOSK_TIMING.presenceAbsenceMs) kioskEvents.publish(Events.presenceLost);
+    },
+  });
+
+  useEffect(() => {
+    if (state === "PRESENCE_DETECTED") armAbsenceTimeout();
+    if (state === "IDLE") {
+      window.clearTimeout(absenceTimerRef.current);
+      absenceTimerRef.current = undefined;
+      lastPresenceEvidenceAtRef.current = null;
+    }
+  }, [state, armAbsenceTimeout]);
 
   const resetUnknownRecognition = () => {
     window.clearTimeout(unknownTimer.current);
@@ -108,20 +154,14 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
   }, [state]);
 
   useEffect(() => {
-    let absenceTimer: number | undefined;
     const unsubscribe = kioskEvents.subscribe(({ event, payload }) => {
-      const { flow: f, camera: c } = current.current;
+      const { flow: f } = current.current;
       if (event === Events.registrationRequested && f.currentState === "UNKNOWN_FACE") {
         resetUnknownRecognition();
         f.transitionTo("REGISTER");
       }
-      if (event === Events.faceDetected || event === Events.presenceDetected) { window.clearTimeout(absenceTimer); absenceTimer = undefined; }
-      if (event === Events.presenceLost && absenceTimer === undefined && ["CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING", "UNKNOWN_FACE"].includes(f.currentState)) {
-        absenceTimer = window.setTimeout(() => {
-          if (["CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING", "UNKNOWN_FACE"].includes(current.current.flow.currentState)) void current.current.flow.resetToIdle("PRESENCE_LOST");
-          absenceTimer = undefined;
-        }, 8000);
-      }
+      if (event === Events.faceDetected || event === Events.presenceDetected ||
+          (event === Events.faceTracking && Array.isArray(payload.faces) && payload.faces.length > 0)) armAbsenceTimeout();
       if (event === Events.sessionState && captureActiveRef.current && payload.mode === "registration" &&
           payload.session_id === f.session?.session_id && Number(payload.capture_generation) === captureGenerationRef.current) {
         enrollmentEvidence.current.acknowledge(captureGenerationRef.current, f.session?.session_id);
@@ -166,14 +206,9 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
           frozenUrlRef.current = URL.createObjectURL(sentFrame.current);
           setFrozenFrameUrl(frozenUrlRef.current);
         }
-        c.stopCamera();
         confirmationSessionRef.current = f.session?.session_id ?? null;
         kioskStream.send("confirm_identity", { session_id: f.session?.session_id });
         f.transitionTo("IDENTITY_CONFIRMING");
-      }
-      if (event === Events.presenceDetected && f.currentState === "IDLE" && !starting.current) {
-        starting.current = true;
-        void f.startSession().finally(() => { starting.current = false; });
       }
       if (event === Events.recognitionStarted && ["CAMERA_PREPARING", "FACE_TRACKING"].includes(f.currentState)) f.transitionTo("FACE_RECOGNIZING");
       if (event === Events.faceTracking) {
@@ -233,10 +268,8 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
       if (event === Events.identityConfirmed && f.currentState === "IDENTITY_CONFIRMING" &&
           confirmationSessionRef.current === f.session?.session_id &&
           payload.session_id === confirmationSessionRef.current) {
-        // Stop physical tracks before publishing the UI identity transition.
         resetUnknownRecognition();
         confirmationSessionRef.current = null;
-        c.stopCamera();
         kioskStream.configure({ mode: "conversation", session_id: f.session?.session_id });
         f.dispatch({ type: "FACE_VERIFY_SUCCESS", result: payload as FaceVerifyResult });
       }
@@ -252,18 +285,12 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
       }
     });
     kioskStream.connect();
-    let presenceTimer: number | undefined;
-    const stopPresence = window.kiosk?.onPresence?.((present) => {
-      window.clearTimeout(presenceTimer);
-      if (present) presenceTimer = window.setTimeout(() => kioskEvents.publish(Events.presenceDetected), 1200);
-      else kioskEvents.publish(Events.presenceLost);
-    });
     return () => {
-      unsubscribe(); stopPresence?.(); window.clearTimeout(presenceTimer); window.clearTimeout(absenceTimer);
+      unsubscribe(); window.clearTimeout(absenceTimerRef.current);
       window.clearTimeout(unknownTimer.current); kioskStream.close();
       if (frozenUrlRef.current) URL.revokeObjectURL(frozenUrlRef.current);
     };
-  }, []);
+  }, [armAbsenceTimeout, wakeUp]);
 
   useEffect(() => {
     if (state !== "IDENTITY_CONFIRMING") return;
@@ -289,7 +316,24 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
   }, [registration, sensing, state === "IDLE", flow.session?.session_id]);
 
   useEffect(() => {
-    if (!sensing && !idleCamera) { sentFrame.current = null; enrollmentEvidence.current.invalidateEvidence(); camera.stopCamera(); return; }
+    let active = true;
+    let retryTimer: number | undefined;
+    const ensureCamera = async () => {
+      const ok = await camera.requestCamera();
+      if (!active) return;
+      if (ok) kioskEvents.publish(Events.cameraReady);
+      else retryTimer = window.setTimeout(() => { void ensureCamera(); }, 1500);
+    };
+    void ensureCamera();
+    return () => { active = false; window.clearTimeout(retryTimer); };
+  }, [camera.requestCamera]);
+
+  useEffect(() => {
+    if (!sensing) {
+      sentFrame.current = null;
+      enrollmentEvidence.current.invalidateEvidence();
+      return;
+    }
     let active = true;
     let timer: number;
     const sample = async () => {
@@ -302,15 +346,15 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
           }
         }
       } catch { /* Track loss is reported by the camera adapter; never queue frames. */ }
-      if (active) timer = window.setTimeout(sample, idleCamera ? 750 : 33);
+      if (active) timer = window.setTimeout(sample, 33);
     };
     void camera.requestCamera().then(ok => {
       if (!active) return;
       if (ok) { kioskEvents.publish(Events.cameraReady); kioskStream.send(Events.cameraReady); void sample(); }
       else { setGuidance("Camera chưa sẵn sàng. Vui lòng kiểm tra quyền truy cập."); timer = window.setTimeout(() => { if (active) void camera.requestCamera().then(ready => { if (active && ready) void sample(); }); }, 1500); }
     });
-    return () => { active = false; sentFrame.current = null; enrollmentEvidence.current.invalidateEvidence(); window.clearTimeout(timer); camera.stopCamera(); kioskEvents.publish(Events.cameraStopped); };
-  }, [sensing, idleCamera, camera.requestCamera, camera.stopCamera, camera.captureFrame]);
+    return () => { active = false; sentFrame.current = null; enrollmentEvidence.current.invalidateEvidence(); window.clearTimeout(timer); };
+  }, [sensing, camera.requestCamera, camera.captureFrame]);
 
   useEffect(() => {
     if (!captureActiveRef.current || state !== "REGISTER" || captureStartedAtRef.current === null) return;
@@ -336,7 +380,8 @@ export function useRealtimeSensor(flow: ReturnType<typeof useKioskFlow>, camera:
       performance.now(),
     );
   };
-  return { guidance, qualityReady, faceCount, faceGuideRects, multipleFacesDetected, sensing, externalPresence,
+  return { guidance, qualityReady, faceCount, faceGuideRects, multipleFacesDetected, sensing,
+    wakeUp,
     captureEnrollmentFrame, beginEnrollmentCapture, endEnrollmentCapture, captureGeneration, capturePrepared,
     captureCountdown, frozenFrameUrl };
 }

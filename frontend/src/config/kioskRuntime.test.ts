@@ -4,7 +4,7 @@ import { hasLiveVideoTrack, isVideoFrameReady } from "./cameraRuntime";
 import { initialState, reducer } from "../hooks/useKioskFlow";
 
 describe("production kiosk state machine", () => {
-  it("starts idle and enters the presence flow without a button", () => {
+  it("starts idle and enters the presence flow after session start", () => {
     const idle = initialState();
     expect(idle.currentState).toBe("IDLE");
     const detected = reducer(idle, { type: "START_SESSION", session: { session_id: "session-1", status: "active" } });

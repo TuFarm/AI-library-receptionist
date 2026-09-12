@@ -91,6 +91,9 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
     sessionStarting.current = true;
     endedSessionRef.current = null;
     dispatch({ type: "SET_PROCESSING", value: true });
+    // Give touch immediate visible feedback, but do not advance to camera
+    // preparation until the backend session is available.
+    dispatch({ type: "TRANSITION", state: "PRESENCE_DETECTED" });
     try {
       const session = await kioskApi.startSession(DEVICE_CODE);
       if (currentEpoch !== epoch.current) { void kioskApi.endSession(session.session_id, "ABANDONED_START").catch(() => undefined); sessionStarting.current = false; return false; }
@@ -220,6 +223,7 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
 
   useEffect(() => {
     if (["PRESENCE_DETECTED", "WAKE_UP", "GREETING"].includes(state.currentState)) {
+      if (!state.session) return;
       const next: KioskState = state.currentState === "PRESENCE_DETECTED" ? "WAKE_UP" : state.currentState === "WAKE_UP" ? "GREETING" : "CAMERA_PREPARING";
       const id = window.setTimeout(() => dispatch({ type: "TRANSITION", state: next }), state.currentState === "GREETING" ? 800 : 150);
       return () => window.clearTimeout(id);
@@ -236,7 +240,7 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
       const id = window.setTimeout(() => { void resetToIdle("COMPLETED"); }, KIOSK_TIMING.returnIdleMs);
       return () => window.clearTimeout(id);
     }
-  }, [state.currentState, resetToIdle]);
+  }, [state.currentState, state.session, resetToIdle]);
 
   useEffect(() => {
     if (state.currentState === "IDLE" || state.isProcessing || state.micStatus === "PROCESSING") return;

@@ -54,9 +54,11 @@ Unknown: FACE_* → UNKNOWN_FACE → REGISTER → REGISTER_PROCESSING
        → REGISTER_SUCCESS → WELCOME
 ```
 
-While scanning, JPEG frames go to `WS /api/v1/kiosk/stream`; only one frame may be in flight. The backend detects/tracks faces, gates quality, attempts recognition on stable tracks, and emits events to the client bus. Three consecutive matches for one identity are required before candidacy. Multiple faces, low quality, movement, disappearance, or reconnect reset voting. The client stops camera tracks before confirming an identity.
+The kiosk supports direct touch wake-up and camera-based local motion sensing; it has no physical presence-sensor bridge. One `MediaStream` is opened for the mounted kiosk and reused across states. In IDLE there is no camera preview, scanner, face guide, recognition, AI processing, or frame upload. A local 96×54 grayscale canvas samples at 5 FPS, evaluates a configurable standing-zone ROI, warms an adaptive background, compensates whole-frame brightness shifts, and requires sustained 6/8 evidence for at least 1.2 seconds. Motion and pointer/touch/Enter/Space all enter the same idempotent state-machine wake path.
 
-Realtime frames remain in memory. Camera requests 1920×1080 preferably (1280×720 minimum); backend limits frames to 2.5 MB and 1920×1080. Production wake-up should come from an Electron presence-sensor bridge so camera remains off when idle; developer mode can simulate presence.
+Only active Face ID states send JPEG frames to `WS /api/v1/kiosk/stream`; only one frame may be in flight. The backend detects/tracks faces, gates quality, attempts recognition on stable tracks, and emits events to the client bus. Three consecutive matches for one identity are required before candidacy. Multiple faces, low quality, movement, disappearance, or reconnect reset voting. `STOP_CAMERA` remains a logical flow state; it does not tear down the shared camera stream.
+
+Realtime frames remain in memory. Camera requests 1920×1080 preferably (1280×720 minimum); backend limits frames to 2.5 MB and 1920×1080. Idle motion pixels are processed locally and are never logged, stored, or sent. Face ID quality, enrollment evidence, unknown-recognition, tracking, and confirmation guards remain authoritative. The IDLE rotating tips are a typed static list in `frontend/src/content/kioskIdleFacts.ts` and require no database/admin data.
 
 Voice is turn-based, not Gemini Live/full-duplex: greeting → browser STT (`vi-VN`) → final transcript → AI request → browser TTS → listening. Keyboard input is always a fallback. Raw microphone audio is not sent through the WebSocket.
 

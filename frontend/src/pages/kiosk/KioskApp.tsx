@@ -13,7 +13,8 @@ import WelcomeScreen from "./WelcomeScreen";
 import { isRecognitionState, RecognitionScreen } from "./RecognitionScreen";
 import { kioskEvents } from "../../runtime/eventBus";
 import { RuntimeEvent as Events } from "../../runtime/events";
-import { isDeveloperControlsEnabled } from "../../config/developerControls";
+import KioskIdleScreen from "./KioskIdleScreen";
+import { avatarMoodForState } from "../../runtime/avatarMood";
 
 const VOICE = new Set(["AI_GREETING", "VOICE_LISTENING", "USER_SPEAKING", "PROCESSING", "AI_SPEAKING", "LISTENING"]);
 export default function KioskApp() {
@@ -22,7 +23,8 @@ export default function KioskApp() {
   const sensor = useRealtimeSensor(flow, camera);
   const state = flow.currentState;
   let content;
-  if (VOICE.has(state)) content = <KioskVoiceChatScreen flow={flow}/>;
+  if (state === "IDLE") content = <KioskIdleScreen onWake={sensor.wakeUp}/>;
+  else if (VOICE.has(state)) content = <KioskVoiceChatScreen flow={flow}/>;
   else if (state === "REGISTER" || state === "REGISTER_PROCESSING") content = <FaceRegistrationScreen videoRef={camera.videoRef} cameraStatus={camera.cameraStatus}
     cameraError={camera.error} busy={flow.isProcessing} captureFrame={sensor.captureEnrollmentFrame} qualityReady={sensor.qualityReady}
     faceCount={sensor.faceCount} faceGuideRects={sensor.faceGuideRects} multipleFacesDetected={sensor.multipleFacesDetected} onEnroll={flow.enrollFace}
@@ -44,21 +46,13 @@ export default function KioskApp() {
     faceCount={sensor.faceCount} faceGuideRects={sensor.faceGuideRects} multipleFacesDetected={sensor.multipleFacesDetected}
     onRegister={() => { kioskEvents.publish(Events.registrationRequested); kioskStream.send(Events.registrationRequested); }}/>;
   else content = <div className="kiosk-center assistant-stage">
-    <AssistantAvatar mood={state === "ERROR" ? "error" : state === "UNKNOWN_FACE" ? "unknown" : state === "FACE_RECOGNIZED" ? "happy" : state === "RETURN_IDLE" ? "goodbye" : state === "IDLE" ? "idle" : "greeting"}/>
+    <AssistantAvatar mood={avatarMoodForState(state)}/>
     <span className="kiosk-kicker">TRỢ LÝ AI THƯ VIỆN</span>
-    <h1>{state === "IDLE" ? "Xin chào, tôi có thể giúp bạn" : state === "FACE_RECOGNIZED" ? "Rất vui được gặp bạn!" : state === "RETURN_IDLE" ? "Hẹn gặp lại" : state === "ERROR" ? "Trợ lý tạm thời gián đoạn" : "Chào mừng bạn đến thư viện"}</h1>
-    <p aria-live="polite">{flow.error ?? (state === "IDLE" ? "Hãy đến gần để trò chuyện cùng tôi" : sensor.guidance)}</p>
+    <h1>{state === "FACE_RECOGNIZED" ? "Rất vui được gặp bạn!" : state === "RETURN_IDLE" ? "Hẹn gặp lại" : state === "ERROR" ? "Trợ lý tạm thời gián đoạn" : "Chào mừng bạn đến thư viện"}</h1>
+    <p aria-live="polite">{flow.error ?? sensor.guidance}</p>
     {state === "ERROR" && <button onClick={() => void flow.resetToIdle("ERROR_RECOVERY")}>Về màn hình chờ</button>}
   </div>;
   return <KioskChrome state={state} onExit={state !== "IDLE" ? () => flow.transitionTo("SURVEY") : undefined}>
     {content}
-    {isDeveloperControlsEnabled && <details className="kiosk-dev-panel">
-      <summary>Runtime diagnostics</summary>
-      <pre>{JSON.stringify({ state, camera: camera.cameraStatus,
-        presence: sensor.externalPresence ? "external sensor" : "not connected" }, null, 2)}</pre>
-      <button disabled={state !== "IDLE" || flow.isProcessing} onClick={() => void flow.startSession()}>
-        Giả lập cảm biến chuyển động
-      </button>
-    </details>}
   </KioskChrome>;
 }

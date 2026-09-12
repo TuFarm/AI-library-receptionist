@@ -2,6 +2,7 @@ import type { Ref } from "react";
 import { AssistantAvatar } from "../../components/kiosk/AssistantAvatar";
 import { CameraPreview } from "../../components/kiosk/CameraPreview";
 import type { CameraStatus, FaceGuideRect, KioskState } from "../../types/kiosk";
+import { avatarMoodForState } from "../../runtime/avatarMood";
 
 const recognitionStates = new Set<KioskState>([
   "CAMERA_PREPARING", "FACE_TRACKING", "FACE_RECOGNIZING", "IDENTITY_CONFIRMING", "UNKNOWN_FACE",
@@ -23,7 +24,7 @@ export function RecognitionScreen({ state, videoRef, cameraStatus, cameraError, 
       showFrameOverlay faceCount={faceCount} faceGuideRects={faceGuideRects} qualityReady={qualityReady}
       multipleFacesDetected={multipleFacesDetected} kioskState={state}/></div>
     <div className="recognition-copy">
-      <AssistantAvatar mood={unknown ? "unknown" : confirming ? "thinking" : "greeting"}/>
+      <AssistantAvatar mood={avatarMoodForState(state)}/>
       {unknown && <div className="unknown-face-icon" aria-hidden="true">😔</div>}
       {!unknown && <span className="kiosk-kicker">NHẬN DIỆN THỜI GIAN THỰC</span>}
       <h1>{heading}</h1>
