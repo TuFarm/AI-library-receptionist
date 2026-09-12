@@ -4,6 +4,7 @@ import type { CameraStatus } from "../types/kiosk";
 
 export function useCamera() {
   const managerRef = useRef(new CameraManager());
+  const [sensingVideo] = useState(() => managerRef.current.sensingVideo);
   const requestRef = useRef<Promise<boolean> | null>(null);
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>("IDLE");
@@ -51,5 +52,5 @@ export function useCamera() {
   }, []);
 
   useEffect(() => stopCamera, [stopCamera]);
-  return { videoRef, videoElement, requestCamera, stopCamera, captureFrame, cameraStatus, error };
+  return { videoRef, videoElement, sensingVideo, requestCamera, stopCamera, captureFrame, cameraStatus, error };
 }

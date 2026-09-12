@@ -7,6 +7,9 @@ import EnrollmentSuccessScreen from "./EnrollmentSuccessScreen";
 import FaceRegistrationScreen, { registrationFieldsForUser } from "./FaceRegistrationScreen";
 import { isRecognitionState, RecognitionScreen } from "./RecognitionScreen";
 import { welcomeMessage } from "./WelcomeScreen";
+import KioskIdleScreen, { FACT_ROTATION_MS } from "./KioskIdleScreen";
+import { KIOSK_IDLE_FACTS } from "../../content/kioskIdleFacts";
+import { avatarMoodForState } from "../../runtime/avatarMood";
 
 const noRef = () => undefined;
 const user: KioskUser = { id: "u1", student_code: "001", full_name: "Nguyễn Văn An" };
@@ -18,6 +21,26 @@ const recognition = (state: "CAMERA_PREPARING" | "IDENTITY_CONFIRMING" | "UNKNOW
 );
 
 describe("kiosk recognition and welcome UI", () => {
+  it("renders a camera-invisible, touchable idle invitation with static facts and privacy copy", () => {
+    const html = renderToStaticMarkup(<KioskIdleScreen onWake={() => true}/>);
+    expect(html).toContain("Chạm hoặc đến gần để bắt đầu");
+    expect(html).toContain("<button"); expect(html).toContain("data-kiosk-wake-cta");
+    expect(html).toContain(KIOSK_IDLE_FACTS[0].text); expect(FACT_ROTATION_MS).toBeGreaterThanOrEqual(8000);
+    expect(FACT_ROTATION_MS).toBeLessThanOrEqual(12000);
+    expect(html).not.toContain("Camera chỉ dùng để phát hiện");
+    expect(html).not.toMatch(/<video|camera-preview|face-frame|scanner|verification-visual/);
+  });
+
+  it("maps kiosk states to avatar mood from one typed source", () => {
+    expect(avatarMoodForState("IDLE")).toBe("idle");
+    expect(avatarMoodForState("PRESENCE_DETECTED")).toBe("greeting");
+    expect(avatarMoodForState("FACE_TRACKING")).toBe("focused");
+    expect(avatarMoodForState("LISTENING")).toBe("listening");
+    expect(avatarMoodForState("PROCESSING")).toBe("thinking");
+    expect(avatarMoodForState("AI_SPEAKING")).toBe("speaking");
+    expect(avatarMoodForState("ERROR")).toBe("error");
+    expect(avatarMoodForState("RETURN_IDLE")).toBe("idle");
+  });
   it("unmounts recognition copy when registration is rendered", () => {
     expect(isRecognitionState("REGISTER")).toBe(false);
     const html = renderToStaticMarkup(<FaceRegistrationScreen videoRef={noRef} cameraStatus="READY" busy={false}

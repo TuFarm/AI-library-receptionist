@@ -17,6 +17,8 @@ export const KIOSK_ENROLLMENT = {
 export const KIOSK_TIMING = {
   presenceConfirmationMs: 1200,
   presenceSampleMs: 200,
+  presenceAbsenceMs: 9000,
+  presenceWakeCooldownMs: 1000,
   cameraPreparationMs: 1000,
   faceStableMs: 1200,
   faceSampleMs: 160,
@@ -33,8 +35,17 @@ export const KIOSK_TIMING = {
 } as const;
 
 export const KIOSK_MOTION = {
-  presenceDifference: 7,
-  minimumContrast: 15,
+  canvasWidth: 96,
+  canvasHeight: 54,
+  warmupSamples: 8,
+  historySamples: 8,
+  requiredMotionSamples: 6,
+  pixelDelta: 14,
+  enterRatio: 0.08,
+  exitRatio: 0.04,
+  baselineAlpha: 0.025,
+  nativeFaceSampleMs: 1000,
+  roi: { x: 0.2, y: 0.08, width: 0.6, height: 0.84 },
   stableDifference: 4.5,
 } as const;
 

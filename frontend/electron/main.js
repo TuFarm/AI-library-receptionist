@@ -37,7 +37,6 @@ async function createWindow() {
       sandbox: true,
       nodeIntegration: false,
       preload: path.join(__dirname, "preload.cjs"),
-      additionalArguments: isDev ? ["--kiosk-development"] : [],
     },
   });
 
@@ -54,12 +53,6 @@ async function createWindow() {
 app.whenReady().then(async () => {
   configureKioskPermissions();
   ipcMain.handle("kiosk:get-app-version", (event) => { if (!trusted(event.senderFrame?.url ?? "")) throw new Error("Untrusted renderer"); return app.getVersion(); });
-  if (isDev) {
-    ipcMain.handle("kiosk:get-diagnostics", (event) => {
-      if (!trusted(event.senderFrame?.url ?? "")) throw new Error("Untrusted renderer");
-      return { version: app.getVersion(), electron: process.versions.electron, processes: app.getAppMetrics().map(({ pid, type, cpu, memory }) => ({ pid, type, cpu, memory })) };
-    });
-  }
   await createWindow();
 
   app.on("activate", async () => {

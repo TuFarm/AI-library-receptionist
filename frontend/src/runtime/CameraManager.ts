@@ -19,6 +19,7 @@ export class CameraManager {
   private preview: HTMLVideoElement | null = null;
   private generation = 0;
   get live() { return hasLiveVideoTrack(this.stream); }
+  get sensingVideo() { return this.captureElement(); }
   private captureElement() {
     if (!this.captureVideo) {
       this.captureVideo = document.createElement("video");
