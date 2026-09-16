@@ -23,7 +23,7 @@ It is **not** a library-management system. Do not add catalog, author, publisher
 | `frontend/src/runtime/` | Event bus, WebSocket, state guard, camera manager, realtime sensor. |
 | `frontend/src/pages/admin/` | Admin pages; separate from kiosk UI. |
 | `frontend/electron/` | Electron main/preload; packaged kiosk uses MemoryRouter. |
-| `docker-compose.yml` | Local PostgreSQL 16 and Redis 7. |
+| `docker-compose.yml` | Production-like full stack: Nginx frontend, FastAPI, migrations, PostgreSQL 16, and Redis 7. |
 
 ## Architecture
 
@@ -116,9 +116,41 @@ enrollment path. Biometric end-to-end identity tests must use `local` or a real 
 
 Prerequisites: Docker Desktop, Python 3.12 recommended for optional local face support, Node.js/npm, browser camera/microphone access.
 
+### Production-like Docker installation and smoke test
+
+The Compose stack builds and runs the complete web application. PostgreSQL and Redis are
+available only on the private Compose network; Nginx is the single public entry point and
+proxies API/WebSocket traffic to FastAPI. Database migrations run before the backend starts.
+
+```bash
+cp .env.production.example .env
+# Edit .env: set a strong POSTGRES_PASSWORD, APP_PORT, allowed origin, and providers.
+docker compose up -d --build --wait
+docker compose ps
+curl --fail http://localhost/health
+```
+
+If `APP_PORT` is not `80`, include it in the URL (for example,
+`http://localhost:8080/health`). Open `/kiosk/fullscreen` or `/admin/dashboard` through the
+same public URL. Follow logs with `docker compose logs -f backend frontend`; stop the stack
+with `docker compose down`. Named volumes preserve PostgreSQL, Redis, and uploaded media.
+Use `docker compose down --volumes` only when intentionally deleting that data.
+
+For an internet-facing deployment, terminate HTTPS at a trusted reverse proxy/load balancer,
+set `KIOSK_STREAM_ORIGINS` to the exact public HTTPS origin(s), keep database/Redis ports
+private, and provide secrets through the deployment platform rather than committing `.env`.
+
+To validate configuration without starting containers:
+
+```bash
+docker compose config --quiet
+```
+
+The manual development workflow remains available below.
+
 ```powershell
-# root
-docker compose up -d
+# root (start only development dependencies and expose their ports)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres redis
 
 # backend
 cd backend

@@ -2,10 +2,7 @@ import type { ActiveSurvey, BookCategory, FaceEnrollmentResult, FaceRegistration
 
 type ApiEnvelope<T> = { success: boolean; message: string; data: T; error?: { code: string; details?: unknown } };
 const configuredBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "")
-  ?? (import.meta.env.DEV ? "http://localhost:8000" : undefined);
-if (!configuredBase) {
-  throw new Error("VITE_API_BASE_URL is required for a production kiosk build.");
-}
+  ?? (import.meta.env.DEV ? "http://localhost:8000" : window.location.origin);
 export const API_ROOT = configuredBase.endsWith("/api/v1") ? configuredBase : `${configuredBase}/api/v1`;
 export const MOCK_FALLBACK_ENABLED = String(import.meta.env.VITE_ENABLE_MOCK_FALLBACK ?? "false").toLowerCase() === "true";
 
