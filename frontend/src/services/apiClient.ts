@@ -1,13 +1,14 @@
 import type { ActiveSurvey, BookCategory, FaceEnrollmentResult, FaceRegistrationFields, KioskConversation, KioskMessage, KioskSession, KioskUser, SuggestedBook } from "../types/kiosk";
+import { adminHeaders, clearAdminSession, type AdminSession } from "./adminAccess";
 
 type ApiEnvelope<T> = { success: boolean; message: string; data: T; error?: { code: string; details?: unknown } };
-const configuredBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "")
-  ?? (import.meta.env.DEV ? "http://localhost:8000" : window.location.origin);
-export const API_ROOT = configuredBase.endsWith("/api/v1") ? configuredBase : `${configuredBase}/api/v1`;
+const configuredBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim().replace(/\/$/, "");
+const apiBase = configuredBase || (import.meta.env.DEV ? "http://localhost:8000" : window.location.origin);
+export const API_ROOT = apiBase.endsWith("/api/v1") ? apiBase : `${apiBase}/api/v1`;
 export const MOCK_FALLBACK_ENABLED = String(import.meta.env.VITE_ENABLE_MOCK_FALLBACK ?? "false").toLowerCase() === "true";
 
 export class ApiClientError extends Error {
-  constructor(message: string, public status?: number, public code?: string) { super(message); this.name = "ApiClientError"; }
+  constructor(message: string, public status?: number, public code?: string, public fieldErrors: Record<string, string> = {}) { super(message); this.name = "ApiClientError"; }
 }
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   let response: Response;
@@ -16,7 +17,18 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   } catch { throw new ApiClientError("Không thể kết nối máy chủ. Vui lòng kiểm tra backend hoặc thử lại."); }
   let body: ApiEnvelope<T> | undefined;
   try { body = await response.json() as ApiEnvelope<T>; } catch { /* invalid server response */ }
-  if (!response.ok || !body?.success) throw new ApiClientError(body?.message ?? "Máy chủ không thể xử lý yêu cầu.", response.status, body?.error?.code);
+  if (!response.ok || !body?.success) {
+    const fieldErrors: Record<string, string> = {};
+    const labels: Record<string, string> = { username: "Tên đăng nhập", password: "Mật khẩu", current_password: "Mật khẩu hiện tại", new_password: "Mật khẩu mới", full_name: "Họ và tên", student_code: "Mã sinh viên", email: "Email", phone: "Số điện thoại", faculty: "Khoa", major: "Ngành", admission_year: "Năm nhập học" };
+    if (response.status === 422 && Array.isArray(body?.error?.details)) {
+      for (const detail of body.error.details as Array<{ loc?: string[]; type?: string }>) {
+        const field = detail.loc?.at(-1);
+        if (field && labels[field]) fieldErrors[field] = `${labels[field]} ${detail.type === "missing" ? "là bắt buộc" : "không hợp lệ"}.`;
+      }
+    }
+    const message = response.status === 422 ? (Object.values(fieldErrors).join(" ") || (body?.message !== "Validation error" ? body?.message : undefined) || "Dữ liệu chưa hợp lệ. Vui lòng kiểm tra lại các trường.") : body?.message ?? "Máy chủ không thể xử lý yêu cầu.";
+    throw new ApiClientError(message, response.status, body?.error?.code, fieldErrors);
+  }
   return body.data;
 }
 export const apiClient = {
@@ -69,7 +81,90 @@ export const surveyApi = {
   getActiveSurvey: () => apiClient.get<ActiveSurvey | null>("/surveys/active"),
   submitSurvey: (surveyId: string, payload: { answers: Record<string, unknown>; session_id?: string; user_id?: string }) => apiClient.post<{ response_id: string; answer_count: number }>(`/surveys/${surveyId}/responses`, payload),
 };
+async function adminRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  try { return await request<T>(path, { ...options, headers: adminHeaders() }); }
+  catch (error) {
+    if (error instanceof ApiClientError && error.status === 401) {
+      clearAdminSession();
+      if (typeof window !== "undefined") window.dispatchEvent(new Event("admin-session-expired"));
+    }
+    throw error;
+  }
+}
+const adminClient = {
+  get: <T>(path: string) => adminRequest<T>(path),
+  post: <T>(path: string, data: unknown) => adminRequest<T>(path, { method: "POST", body: JSON.stringify(data) }),
+  patch: <T>(path: string, data: unknown) => adminRequest<T>(path, { method: "PATCH", body: JSON.stringify(data) }),
+  delete: <T>(path: string) => adminRequest<T>(path, { method: "DELETE" }),
+};
 export const adminApi = {
-  getDashboard: () => apiClient.get<Record<string, unknown>>("/admin/dashboard/mock"),
-  getStatus: () => apiClient.get<Array<{ module: string; status: string; warning?: string | null }>>("/admin/status"),
+  verifyAccess: (username: string, password: string) => request<AdminSession>("/admin/login", {
+    method: "POST", headers: adminHeaders(), body: JSON.stringify({ username: username.trim(), password }),
+  }),
+  getSession: () => adminClient.get<Omit<AdminSession, "token">>("/admin/session"),
+  logout: () => adminClient.post<null>("/admin/logout", {}),
+  changePassword: (current_password: string, new_password: string) => adminClient.post<null>("/admin/password", { current_password, new_password }),
+  getDashboard: (days?: number) => adminClient.get<AdminDashboard>(`/admin/dashboard${days ? `?days=${days}` : ""}`),
+  getStatus: () => adminClient.get<Array<{ module: string; status: string; warning?: string | null }>>("/admin/status"),
+};
+
+export type AdminDashboard = {
+  total_sessions: number;
+  identified_users: number;
+  questions: number;
+  ai_answers: number;
+  surveys: number;
+  recognition_success_count: number;
+  recognition_failure_count: number;
+  recognition_success_rate: number;
+  avg_wait_seconds: number;
+  camera_network_errors: number;
+  daily: Array<{ date: string; sessions: number; identified: number }>;
+};
+
+export type AdminUser = {
+  id: string;
+  student_code: string | null;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  faculty: string | null;
+  major: string | null;
+  admission_year: number | null;
+  student_year: number | null;
+  user_type: string;
+  account_status: string;
+};
+
+export const adminUserApi = {
+  list: (search = "", offset = 0, limit = 20) => adminClient.get<{ items: AdminUser[]; total: number }>(`/users?offset=${offset}&limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ""}`),
+  create: (payload: Omit<AdminUser, "id" | "student_year" | "user_type" | "account_status"> & { student_code: string; email: string }) => adminClient.post<AdminUser>("/users", payload),
+  update: (id: string, payload: Partial<Pick<AdminUser, "student_code" | "full_name" | "email" | "phone" | "faculty" | "major" | "admission_year">>) => adminClient.patch<AdminUser>(`/users/${id}`, payload),
+  get: (id: string) => adminClient.get<AdminUser>(`/users/${id}`),
+  delete: (id: string) => adminClient.delete<{ user_id: string; account_status: string }>(`/users/${id}`),
+};
+
+export type ReportsOverview = {
+  period_days: number;
+  total_sessions: number;
+  identified_users: number;
+  total_questions: number;
+  total_ai_answers: number;
+  recognition_success: number;
+  recognition_failure: number;
+  recognition_success_rate: number;
+  avg_wait_seconds: number;
+  camera_network_errors: number;
+};
+
+export type SessionReport = {
+  period_days: number;
+  by_exit_reason: Record<string, number>;
+  by_device: Record<string, number>;
+  avg_duration_seconds: number;
+};
+
+export const reportsApi = {
+  getOverview: (days = 7) => adminClient.get<ReportsOverview>(`/reports/overview?days=${days}`),
+  getSessions: (days = 7) => adminClient.get<SessionReport>(`/reports/sessions?days=${days}`),
 };

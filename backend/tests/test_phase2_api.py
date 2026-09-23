@@ -57,7 +57,46 @@ def test_kiosk_session_flow(monkeypatch):
     assert ended["next_state"] == "IDLE"
 
 
-def test_mock_report_overview():
-    data = client.get("/api/v1/reports/overview/mock").json()["data"]
+def test_mock_report_overview(monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "admin_username", "test-user")
+    monkeypatch.setattr(settings, "admin_password", "test-pass")
+    data = client.get("/api/v1/reports/overview/mock", headers={"Authorization": "Basic dGVzdC11c2VyOnRlc3QtcGFzcw=="}).json()["data"]
     assert data["total_sessions"] > 0
     assert data["avg_satisfaction_score"] <= 5
+
+
+def test_admin_dashboard_exposes_operational_metrics(monkeypatch):
+    from app.api.v1.routes import admin
+    monkeypatch.setattr(admin.settings, "admin_username", "test-user")
+    monkeypatch.setattr(admin.settings, "admin_password", "test-pass")
+
+    class FakeResult:
+        def all(self):
+            return []
+
+    class FakeDatabase:
+        def __init__(self):
+            self.values = iter([10, 4, 20, 18, 5, 8, 6, 250, 3])
+
+        def scalar(self, _query):
+            return next(self.values)
+
+        def get_bind(self):
+            return SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+
+        def execute(self, _query):
+            return FakeResult()
+
+    app.dependency_overrides[admin.get_db] = lambda: FakeDatabase()
+    try:
+        data = client.get("/api/v1/admin/dashboard", headers={"Authorization": "Basic dGVzdC11c2VyOnRlc3QtcGFzcw=="}).json()["data"]
+    finally:
+        app.dependency_overrides.pop(admin.get_db, None)
+
+    assert data["total_sessions"] == 10
+    assert data["recognition_success_count"] == 6
+    assert data["recognition_failure_count"] == 2
+    assert data["recognition_success_rate"] == 75.0
+    assert data["avg_wait_seconds"] == 0.25
+    assert data["camera_network_errors"] == 3

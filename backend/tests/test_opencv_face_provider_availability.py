@@ -199,6 +199,8 @@ def test_opencv_enrollment_missing_models_fails_without_mock_fallback(monkeypatc
     monkeypatch.setattr(face_service.settings, "face_provider", "local_opencv")
     monkeypatch.setattr(face_service.settings, "face_yunet_model_path", None)
     monkeypatch.setattr(face_service.settings, "face_sface_model_path", None)
+    # Test fixture only: reach model validation without changing runtime defaults.
+    monkeypatch.setattr(face_service.settings, "face_sface_cosine_threshold", 0.5)
     face_service._get_opencv_provider.cache_clear()
     with pytest.raises(FaceProviderUnavailable, match="thiếu cấu hình model YuNet"):
         FaceService().enroll_face(__import__("uuid").uuid4(), image)

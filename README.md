@@ -79,6 +79,39 @@ Responses normally use `{ success, message, data }`; errors use `{ success: fals
 
 Read route files for request/response schemas. Endpoint presence does not mean production readiness.
 
+### Basic admin access
+
+Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` in the backend environment (or
+`backend/.env` when starting from that directory). The demo defaults are
+`admin` / `admin`. Open `/admin/dashboard` and enter those credentials. The UI
+keeps them in memory until logout or reload and sends HTTP Basic credentials only
+on staff requests. Do not put them in a `VITE_*` variable or commit them to source control.
+
+All `/admin/*` (except `/admin/login`), `/reports/*`, and non-biometric `/users`
+CRUD endpoints require the configured username/password: missing credentials
+return 401, incorrect credentials 403, and missing server configuration 503.
+This is shared staff access, not per-user JWT/RBAC.
+Existing kiosk and Face ID routes are outside this access-control change.
+
+Profile writes accept only name, student code, email, phone, faculty, major and
+admission year. Unknown fields and invalid input return 422; duplicate student
+codes/emails return 409, including values reserved by soft-deleted profiles.
+Deleting a profile deactivates the account and hides it from profile CRUD without
+deleting its Face ID material. Dashboard totals use the selected number of UTC
+calendar days through the current time; its daily series groups the original sessions
+so it works before any daily aggregate job runs. Reports use the same time window.
+Department/major writes also require staff access; their lookup GET routes remain public.
+
+For the complete backend unit suite, install `backend/requirements-test.txt` instead
+of only the runtime requirements. It adds NumPy and Pillow for test fixtures without
+enabling a native Face ID provider. From `backend`, run
+`python -m pip install -r requirements-test.txt`, then `python -m pytest -q`.
+
+Current clean-database migration limitation: the initial revision validates exactly
+24 tables, while the working model now has 29. Until the migration owner resolves
+that mismatch, `alembic upgrade head` on a new database fails. Creating tables from
+ORM metadata is only a workaround for an isolated disposable demo, not a migration fix.
+
 ## Data model and boundaries
 
 There are 24 tables:

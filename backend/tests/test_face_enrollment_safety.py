@@ -399,6 +399,8 @@ def test_opencv_missing_models_returns_503_before_database_access(monkeypatch, t
     monkeypatch.setattr(face.settings, "media_storage_dir", tmp_path)
     monkeypatch.setattr(face.settings, "face_yunet_model_path", None)
     monkeypatch.setattr(face.settings, "face_sface_model_path", None)
+    # Isolate missing-model validation from the earlier threshold guard (test only).
+    monkeypatch.setattr(face.settings, "face_sface_cosine_threshold", 0.5)
     face_service._get_opencv_provider.cache_clear()
     app.dependency_overrides[get_db] = lambda: database
     try:
@@ -493,9 +495,12 @@ def test_single_face_endpoint_creates_one_user_and_one_profile(monkeypatch, tmp_
 
 
 def test_profile_update_does_not_touch_face_profile(monkeypatch):
+    monkeypatch.setattr(face_service.settings, "admin_username", "test-user")
+    monkeypatch.setattr(face_service.settings, "admin_password", "test-pass")
     user_id = UUID("11111111-1111-1111-1111-111111111111")
     user = SimpleNamespace(id=user_id, student_code="A001", full_name="Người A", email=None,
-        phone=None, faculty=None, major=None, admission_year=2024, deleted_at=None)
+        phone=None, faculty=None, major=None, admission_year=2024, deleted_at=None,
+        user_type="student", account_status="active")
     biometric = object()
 
     class DB:
@@ -508,7 +513,7 @@ def test_profile_update_does_not_touch_face_profile(monkeypatch):
 
     app.dependency_overrides[get_db] = lambda: DB()
     try:
-        response = TestClient(app).patch(f"/api/v1/users/{user_id}", json={
+        response = TestClient(app).patch(f"/api/v1/users/{user_id}", headers={"Authorization": "Basic dGVzdC11c2VyOnRlc3QtcGFzcw=="}, json={
             "full_name": "Người A đã sửa", "major": "Công nghệ thông tin", "admission_year": 2023,
         })
         assert response.status_code == 200

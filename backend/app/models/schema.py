@@ -1,4 +1,4 @@
-"""Practical 24-table schema for the AI library kiosk assistant."""
+"""Practical 29-table schema for the AI library kiosk assistant."""
 from __future__ import annotations
 
 import uuid
@@ -529,3 +529,54 @@ class DailyReportMetric(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     total_surveys: Mapped[int] = mapped_column(Integer, default=0)
     avg_satisfaction_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
     avg_ai_response_time_ms: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+
+
+class Department(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "departments"
+    code: Mapped[str] = mapped_column(String(20), unique=True, index=True)  # e.g. 'CNTT', 'NN'
+    name: Mapped[str] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    majors: Mapped[list[Major]] = relationship(back_populates="department")
+
+
+class Major(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "majors"
+    department_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("departments.id", ondelete="RESTRICT"), index=True)
+    code: Mapped[str] = mapped_column(String(30), unique=True, index=True)  # e.g. 'CNTT-KTPM'
+    name: Mapped[str] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    department: Mapped[Department] = relationship(back_populates="majors")
+
+
+class KioskDevice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "kiosk_devices"
+    device_name: Mapped[str] = mapped_column(String(150))
+    api_key_hash: Mapped[str] = mapped_column(String(255), index=True)  # SHA-256 hashed API key
+    status: Mapped[str] = mapped_column(String(30), default="ACTIVE", index=True)  # ACTIVE, INACTIVE, MAINTENANCE
+    last_ping_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ChatSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "chat_sessions"
+    kiosk_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("kiosk_devices.id", ondelete="SET NULL"), index=True)
+    major_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("majors.id", ondelete="SET NULL"), index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    messages: Mapped[list[ChatMessage]] = relationship(back_populates="session")
+
+
+class ChatMessage(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "chat_messages"
+    __table_args__ = (
+        CheckConstraint("feedback_score IS NULL OR feedback_score IN (-1, 1)"),
+        CheckConstraint("latency_ms IS NULL OR latency_ms >= 0"),
+        Index("ix_chat_message_session_time", "session_id", "created_at"),
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chat_sessions.id", ondelete="RESTRICT"), index=True)
+    role: Mapped[str] = mapped_column(String(20), index=True)  # 'user', 'assistant', 'system'
+    content: Mapped[str] = mapped_column(Text)
+    intent_detected: Mapped[str | None] = mapped_column(String(120))
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    feedback_score: Mapped[int | None] = mapped_column(Integer)  # -1 dislike, 1 like
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    session: Mapped[ChatSession] = relationship(back_populates="messages")

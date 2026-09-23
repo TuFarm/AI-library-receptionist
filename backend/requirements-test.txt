@@ -1,0 +1,4 @@
+-r requirements.txt
+# Array/image fixtures used by the unit suite; no native Face ID provider needed.
+numpy>=2.2,<3
+Pillow>=11.3,<13

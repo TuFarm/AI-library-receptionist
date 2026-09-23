@@ -30,14 +30,14 @@ class MockCurrentUserResponse(BaseModel):
 
 
 class UserProfileUpdate(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
     full_name: str | None = Field(default=None, min_length=2, max_length=255)
     email: str | None = Field(default=None, max_length=320)
     phone: str | None = Field(default=None, max_length=30)
     faculty: str | None = Field(default=None, max_length=150)
     major: str | None = Field(default=None, max_length=150)
-    admission_year: int | None = Field(default=None, ge=1990, le=2100)
+    admission_year: int | None = Field(default=None, ge=1990, le=2100, strict=True)
     student_code: str | None = Field(default=None, max_length=50)
 
     @field_validator("email")
@@ -50,7 +50,8 @@ class UserProfileUpdate(BaseModel):
     @field_validator("phone")
     @classmethod
     def valid_phone(cls, value):
-        if value and not re.fullmatch(r"[+0-9() .-]{7,30}", value):
+        if value and (not re.fullmatch(r"\+?[0-9() .-]{7,30}", value)
+                      or not 7 <= sum(char.isdigit() for char in value) <= 15):
             raise ValueError("Số điện thoại không hợp lệ")
         return value or None
 
@@ -70,3 +71,44 @@ class UserProfileUpdate(BaseModel):
         if self.admission_year is not None and self.admission_year > datetime.now(UTC).year + 1:
             raise ValueError("Năm nhập học không hợp lệ")
         return self
+
+
+class UserCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    student_code: str = Field(min_length=3, max_length=50)
+    full_name: str = Field(min_length=2, max_length=255)
+    email: str = Field(max_length=320)
+    phone: str | None = Field(default=None, max_length=30)
+    faculty: str | None = Field(default=None, max_length=150)
+    major: str | None = Field(default=None, max_length=150)
+    admission_year: int | None = Field(default=None, ge=1990, le=2100, strict=True)
+
+    @field_validator("admission_year")
+    @classmethod
+    def valid_admission_year(cls, value: int | None) -> int | None:
+        if value is not None and value > datetime.now(UTC).year + 1:
+            raise ValueError("Năm nhập học không hợp lệ")
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def valid_email(cls, value: str) -> str:
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
+            raise ValueError("Email không hợp lệ")
+        return value
+
+    @field_validator("student_code")
+    @classmethod
+    def valid_student_code(cls, value: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{3,50}", value):
+            raise ValueError("Mã sinh viên không hợp lệ")
+        return value
+
+    @field_validator("phone")
+    @classmethod
+    def valid_phone(cls, value: str | None) -> str | None:
+        if value and (not re.fullmatch(r"\+?[0-9() .-]{7,30}", value)
+                      or not 7 <= sum(char.isdigit() for char in value) <= 15):
+            raise ValueError("Số điện thoại không hợp lệ")
+        return value or None

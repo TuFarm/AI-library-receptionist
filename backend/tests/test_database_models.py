@@ -16,6 +16,7 @@ EXPECTED_TABLES = {
     "prompt_versions", "book_categories", "suggested_books",
     "book_suggestion_logs", "surveys", "survey_questions", "survey_responses",
     "survey_answers", "daily_report_metrics",
+    "departments", "majors", "kiosk_devices", "chat_sessions", "chat_messages",
 }
 
 OLD_TABLES = {

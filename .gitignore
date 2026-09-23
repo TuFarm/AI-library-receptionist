@@ -26,5 +26,6 @@ backend/storage/media/**
 
 # Provision ONNX weights outside Git; configure their absolute paths at deploy time.
 backend/models/
+backend/storage/admin/
 *.onnx
 *.tsbuildinfo

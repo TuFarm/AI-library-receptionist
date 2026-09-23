@@ -41,6 +41,15 @@ class Settings(BaseSettings):
     max_image_upload_mb: int = 5
     max_audio_upload_mb: int = 15
 
+    # Auth settings
+    jwt_secret_key: str = "dev-secret-change-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 30
+    jwt_refresh_token_expire_days: int = 7
+    admin_username: str = "admin"
+    admin_password: str = "admin"
+    admin_auth_store_path: Path = Path(__file__).resolve().parents[2] / "storage" / "admin" / "auth.sqlite3"
+
     @field_validator("database_url", mode="before")
     @classmethod
     def select_psycopg_driver(cls, value: object) -> object:

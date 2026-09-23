@@ -110,3 +110,53 @@
 @media(max-width:900px){.production-idle{grid-template-columns:1fr;gap:24px;overflow:auto;padding:25px 0}.idle-hero{align-items:center;text-align:center}.idle-avatar-wrap{margin-bottom:16px}.idle-lead{margin-bottom:22px}.idle-capabilities{justify-content:center}.idle-fact{width:min(680px,100%);min-height:0;padding:25px}}
 @media(max-height:760px) and (min-width:901px){.idle-avatar-wrap{margin-bottom:18px}.idle-avatar-wrap .assistant-avatar-runtime{width:104px;height:104px}.idle-hero h1{font-size:58px;margin:12px 0}.idle-lead{margin-bottom:18px}.idle-wake-cta{min-height:64px}.idle-capabilities{margin-top:16px}.idle-fact{min-height:230px;padding:30px}}
 @media(prefers-reduced-motion:reduce){.idle-fact p,.idle-avatar-wrap .assistant-avatar-runtime{animation:none}.idle-wake-cta,.idle-wake-cta b,.idle-fact-dots i{transition:none}}
+.loading-state,.empty-state{padding:34px;text-align:center;color:var(--muted)}.empty-state strong{display:block;color:var(--navy);margin-bottom:7px}.empty-state p{margin:0 0 18px}.form-panel{margin-bottom:22px}.admin-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;align-items:end}.admin-form label{display:flex;flex-direction:column;gap:7px;color:var(--muted);font-size:12px;font-weight:600}.admin-form input,.table-search input{min-width:0;height:44px;padding:0 12px;border:1px solid var(--line);border-radius:10px;color:var(--navy);background:#fff}.admin-form button{height:44px}.table-search{display:flex;gap:8px}.table-search input{width:min(260px,40vw)}.table-search button{min-height:44px;padding:0 15px}.tip.error{border-color:#f0c9c9;background:#fff3f3;color:var(--red)}@media(max-width:1000px){.admin-form{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:620px){.admin-form{grid-template-columns:1fr}.panel-head{align-items:flex-start;flex-direction:column}.table-search,.table-search input{width:100%}}
+/* Validation errors */
+.field-error input{border-color:var(--red)!important;box-shadow:0 0 0 2px #e0313112}.validation-error{color:var(--red);font-size:11px;font-weight:500;margin-top:2px}
+/* Row actions and danger text */
+.row-actions{display:flex;gap:6px}.danger-text{color:var(--red)!important}.danger-text:hover{background:#fff3f3!important}
+button.danger{background:var(--red);color:#fff;border-color:var(--red)}button.danger:hover{background:#c0392b}
+/* Confirm dialog overlay */
+.modal-overlay{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(3px)}.modal-dialog{background:#fff;border-radius:16px;padding:28px;width:min(420px,92vw);box-shadow:0 20px 60px rgba(0,20,45,.3)}.modal-dialog h3{margin:0 0 10px;font-size:18px}.modal-dialog p{margin:0 0 20px;color:var(--muted);font-size:14px;line-height:1.5}.modal-actions{display:flex;justify-content:flex-end;gap:10px}
+/* Dashboard grid for reports */
+.dashboard-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}@media(max-width:800px){.dashboard-grid{grid-template-columns:1fr}}
+.reports-average-panel{margin-top:18px}
+.survey-summary>.badge{display:inline-flex;margin-bottom:14px}
+
+.admin-shell .admin-logout-button{border:1px solid var(--red);white-space:nowrap}
+.admin-shell .admin-logout-button:hover{background:#fff3f3;box-shadow:0 8px 20px #c348481a}
+.admin-report-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+.admin-report-actions button{flex-shrink:0;white-space:nowrap;font-size:14px;padding:0 14px}
+.admin-report-actions .admin-export-button{background:#5395df;color:#fff}
+.admin-report-actions .admin-export-button:hover{background:#4083cf}
+
+.admin-theme{min-height:100vh;background:#f5f7fb;color:#172033;color-scheme:light}
+.admin-theme-toggle{gap:8px;white-space:nowrap;font-size:13px}
+.admin-theme-toggle>span{font-size:20px}
+.admin-account{position:relative}
+.admin-account-trigger{padding:0;min-height:40px;border:1px solid var(--line)}
+.admin-account-menu{position:absolute;right:0;top:calc(100% + 10px);width:230px;padding:10px;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 35px #17203320;z-index:30}
+.admin-account-menu>strong{display:block;padding:8px 10px;color:var(--muted);font-size:12px}
+.admin-account-menu>button{display:flex;width:100%;justify-content:flex-start;background:transparent;color:var(--navy);font-size:14px;min-height:42px;padding:0 10px}
+.admin-account-menu>button:hover,.admin-account-menu>button:focus-visible{background:var(--pale);transform:none}
+.admin-account-menu>.admin-menu-logout{color:var(--red)}
+.admin-account-menu [role=alert]{font-size:12px;padding:0 10px;color:var(--red)}
+.admin-password-dialog{width:min(440px,calc(100vw - 32px));border:1px solid var(--line);border-radius:18px;padding:28px;background:#fff;color:inherit;box-shadow:0 24px 80px #0003}
+.admin-password-dialog::backdrop{background:#10203888}
+.admin-password-dialog h2{margin:0 0 10px}
+.admin-password-dialog p{font-size:14px;line-height:1.6;color:var(--muted)}
+.admin-password-dialog form{display:grid;gap:16px}
+.admin-password-dialog label{display:grid;gap:7px;font-size:13px}
+.admin-password-dialog input{min-width:0;width:100%;height:44px;border:1px solid var(--line);border-radius:10px;padding:0 12px}
+.admin-password-dialog [role=alert]{color:var(--red)}
+.admin-theme[data-theme=dark]{color-scheme:dark;background:#101827;color:#e5edf8;--navy:#e5edf8;--muted:#a9b7cd;--line:#344257;--pale:#203755;--red:#ff9292}
+.admin-theme[data-theme=dark] :is(.sidebar,.topbar,.panel,.metric-card,.admin-account-menu,.admin-password-dialog,.modal-dialog){background:#192437;color:#e5edf8;border-color:var(--line)}
+.admin-theme[data-theme=dark] :is(.secondary,.admin-form input,.table-search input,.admin-password-dialog input){background:#111c2d;color:#e5edf8;border-color:var(--line)}
+.admin-theme[data-theme=dark] :is(.sidebar nav a,.sidebar-foot,.sidebar-foot small,.admin-form label){color:#b9c7dc}
+.admin-theme[data-theme=dark] .sidebar nav a.active{background:#203c63;color:#9bc8ff}
+.admin-theme[data-theme=dark] :is(.metric-icon,.avatar){background:#213e66;color:#a8cfff}
+.admin-theme[data-theme=dark] .tip{background:#183859;color:#d3e8ff;border-color:#2d5782}
+.admin-theme[data-theme=dark] .tip.error{background:#442838;color:#ffc1c1;border-color:#774155}
+.admin-theme[data-theme=dark] :is(.admin-account-menu>button:hover,.admin-account-menu>button:focus-visible){background:#253d5c}
+.admin-theme[data-theme=dark] .admin-account-menu>.admin-menu-logout{color:#ff9292}
+.admin-theme[data-theme=dark] :is(.badge.success,.badge.warning){background:#24483d;color:#b4ead1}
