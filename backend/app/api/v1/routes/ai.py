@@ -5,10 +5,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.deps import owned_conversation, require_kiosk_device
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.responses import success_response
-from app.models.schema import AIRequest, AIResponse, Conversation, ConversationMessage, UserSession
+from app.models.schema import AIRequest, AIResponse, Conversation, ConversationMessage, Device, UserSession
 from app.schemas.ai import AIRuntimeRequest, AIAnswerRequest
 from app.services.ai_service import AIService
 from app.services.conversation_service import save_message
@@ -18,7 +19,16 @@ router = APIRouter()
 
 
 @router.post("/answer")
-def runtime_answer(payload: AIRuntimeRequest, db: Session = Depends(get_db)) -> dict:
+def runtime_answer(payload: AIRuntimeRequest, device: Device = Depends(require_kiosk_device),
+                   db: Session = Depends(get_db)) -> dict:
+    conversation = owned_conversation(db, payload.conversation_id, device)
+    if payload.session_id is not None and conversation.session_id != payload.session_id:
+        raise AppError(404, "CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại.")
+    return answer_turn(payload, db)
+
+
+def answer_turn(payload: AIRuntimeRequest, db: Session) -> dict:
+    """Run one AI turn. Callers must already have verified the conversation's device ownership."""
     conversation = db.get(Conversation, payload.conversation_id)
     if conversation is None: raise AppError(404, "CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại.")
     history_rows = list(reversed(db.scalars(select(ConversationMessage).where(
@@ -56,8 +66,9 @@ def runtime_answer(payload: AIRuntimeRequest, db: Session = Depends(get_db)) -> 
         "warning": answer.warning, "next_state": "AI_VOICE_CHAT"}, "Đã tạo câu trả lời.")
 
 
-@router.post("/answer/mock")
+@router.post("/answer/mock", dependencies=[Depends(require_kiosk_device)])
 def mock_answer(payload: AIAnswerRequest) -> dict:
+    # May call the real AI provider, so it is not public.
     answer = AIService().answer(payload.question)
     return success_response({"question": payload.question, "answer": answer.text, "request_type": "library_qa",
         "model_name": answer.model_name, "grounded": False, "confidence_score": answer.confidence_score, "latency_ms": 0})

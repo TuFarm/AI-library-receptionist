@@ -3,10 +3,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.orm import Session
 
+from app.api.deps import owned_conversation, owned_session, require_kiosk_device
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.responses import success_response
-from app.models.schema import Conversation
+from app.models.schema import Conversation, Device
 from app.schemas.voice import BrowserTranscriptCreate
 from app.services.conversation_service import save_message
 from app.services.media_storage_service import MediaStorageService, MediaValidationError
@@ -19,7 +20,11 @@ router = APIRouter()
 
 @router.post("/transcribe")
 async def transcribe(session_id: UUID | None = Form(default=None), conversation_id: UUID | None = Form(default=None),
-                     audio_file: UploadFile = File(), db: Session = Depends(get_db)) -> dict:
+                     audio_file: UploadFile = File(), device: Device = Depends(require_kiosk_device),
+                     db: Session = Depends(get_db)) -> dict:
+    owned_session(db, session_id, device, required=False)
+    if conversation_id:
+        owned_conversation(db, conversation_id, device)
     storage = MediaStorageService()
     try:
         path = await storage.save_audio(audio_file)
@@ -49,7 +54,16 @@ async def transcribe(session_id: UUID | None = Form(default=None), conversation_
 
 
 @router.post("/browser-transcript")
-def browser_transcript(payload: BrowserTranscriptCreate, db: Session = Depends(get_db)) -> dict:
+def browser_transcript(payload: BrowserTranscriptCreate, device: Device = Depends(require_kiosk_device),
+                       db: Session = Depends(get_db)) -> dict:
+    conversation = owned_conversation(db, payload.conversation_id, device)
+    if payload.session_id is not None and conversation.session_id != payload.session_id:
+        raise AppError(404, "CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại.")
+    return save_browser_transcript(payload, db)
+
+
+def save_browser_transcript(payload: BrowserTranscriptCreate, db: Session) -> dict:
+    """Persist a browser STT result. Callers must already have verified device ownership."""
     conversation = db.get(Conversation, payload.conversation_id)
     if conversation is None: raise AppError(404, "CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại.")
     session = db.get(UserSession, payload.session_id) if payload.session_id and conversation.session_id is None else None

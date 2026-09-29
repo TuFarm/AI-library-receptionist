@@ -1,6 +1,10 @@
 import { API_ROOT } from "../services/apiClient";
+import { getDeviceKey, reportDeviceUnauthorized } from "../services/deviceAccess";
 import { kioskEvents, type RuntimeEvent } from "./eventBus";
 import { RuntimeEvent as Events } from "./events";
+
+// Server close codes for a missing/invalid (4401) or disabled/foreign (4403) device.
+const DEVICE_REJECTED = new Set([4401, 4403]);
 
 export class KioskStream {
   private socket: WebSocket | null = null;
@@ -20,6 +24,8 @@ export class KioskStream {
     socket.onopen = () => {
       if (this.socket !== socket || this.closed) { socket.close(); return; }
       this.attempt = 0;
+      // The device key goes in the first message, never in the URL (proxies log URLs).
+      socket.send(JSON.stringify({ event: "AUTH", payload: { device_key: getDeviceKey() } }));
       this.configure(this.config);
       this.heartbeat = window.setInterval(() => this.send("PING", { sent_at: performance.now() }), 15000);
     };
@@ -42,13 +48,18 @@ export class KioskStream {
       kioskEvents.receive(event);
       if (event.event === Events.frameReady) this.lastFrameSentAt = null;
     };
-    socket.onclose = () => {
+    socket.onclose = (event?: CloseEvent) => {
+      const code = event?.code ?? 0;
       if (this.socket !== socket) return;
       this.frameReady = false;
       window.clearInterval(this.heartbeat);
       window.clearTimeout(this.frameDeadline);
       for (const request of this.pending.values()) { window.clearTimeout(request.timer); request.reject(new Error("Kết nối bị gián đoạn.")); }
       this.pending.clear();
+      if (!this.closed && DEVICE_REJECTED.has(code)) {
+        this.closed = true;
+        reportDeviceUnauthorized(code === 4403 ? "DEVICE_DISABLED" : "DEVICE_KEY_INVALID");
+      }
       if (!this.closed) {
         kioskEvents.publish(Events.streamDisconnected);
         this.retry = window.setTimeout(() => this.connect(), Math.min(10000, 500 * 2 ** this.attempt++));

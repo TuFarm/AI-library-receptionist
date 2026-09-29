@@ -6,7 +6,7 @@ Used by admin dashboard to manage canonical department/major data.
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from app.api.deps import require_admin_credentials
+from app.api.deps import require_staff
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -39,7 +39,7 @@ def list_departments(
     ])
 
 
-@router.post("", status_code=201, dependencies=[Depends(require_admin_credentials)])
+@router.post("", status_code=201, dependencies=[Depends(require_staff)])
 def create_department(payload: DepartmentCreate, db: Session = Depends(get_db)) -> dict:
     if db.scalar(select(Department).where(Department.code == payload.code)):
         raise AppError(409, "DEPARTMENT_CODE_EXISTS", f"Mã khoa '{payload.code}' đã tồn tại.")
@@ -53,7 +53,7 @@ def create_department(payload: DepartmentCreate, db: Session = Depends(get_db)) 
     )
 
 
-@router.patch("/{dept_id}", dependencies=[Depends(require_admin_credentials)])
+@router.patch("/{dept_id}", dependencies=[Depends(require_staff)])
 def update_department(
     dept_id: UUID, payload: DepartmentUpdate, db: Session = Depends(get_db),
 ) -> dict:
@@ -91,7 +91,7 @@ def list_majors(
     ])
 
 
-@router.post("/{dept_id}/majors", status_code=201, dependencies=[Depends(require_admin_credentials)])
+@router.post("/{dept_id}/majors", status_code=201, dependencies=[Depends(require_staff)])
 def create_major(
     dept_id: UUID, payload: MajorCreate, db: Session = Depends(get_db),
 ) -> dict:
@@ -112,7 +112,7 @@ def create_major(
     )
 
 
-@router.patch("/majors/{major_id}", dependencies=[Depends(require_admin_credentials)])
+@router.patch("/majors/{major_id}", dependencies=[Depends(require_staff)])
 def update_major(
     major_id: UUID, payload: MajorUpdate, db: Session = Depends(get_db),
 ) -> dict:

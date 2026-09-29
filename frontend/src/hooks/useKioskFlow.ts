@@ -144,16 +144,16 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
     if (sessionId) void kioskApi.logEvent(sessionId, { event_type, content_summary }).catch(() => undefined);
   }, []);
   const updateProfile = useCallback(async (fields: FaceRegistrationFields) => {
-    const user = stateRef.current.user;
-    if (!user) throw new Error("Không tìm thấy hồ sơ người dùng.");
-    const updated = await userApi.update(user.id, fields);
+    const { user, session } = stateRef.current;
+    if (!user || !session) throw new Error("Không tìm thấy hồ sơ người dùng.");
+    const updated = await userApi.update(session.session_id, fields);
     dispatch({ type: "USER_PROFILE_UPDATED", user: updated });
     return updated;
   }, []);
   const deleteFaceId = useCallback(async () => {
-    const user = stateRef.current.user;
-    if (!user) throw new Error("Không tìm thấy hồ sơ người dùng.");
-    return userApi.deleteFaceId(user.id);
+    const { user, session } = stateRef.current;
+    if (!user || !session) throw new Error("Không tìm thấy hồ sơ người dùng.");
+    return userApi.deleteFaceId(session.session_id);
   }, []);
   const startConversation = useCallback(async (): Promise<KioskConversation | null> => {
     const currentEpoch = epoch.current;

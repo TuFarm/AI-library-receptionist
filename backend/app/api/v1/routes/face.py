@@ -7,11 +7,12 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.api.deps import owned_session, require_kiosk_device
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.responses import success_response
-from app.models.schema import Device, FaceAuthenticationLog, FaceProfile, User, UserSession
+from app.models.schema import Device, FaceAuthenticationLog, FaceProfile, User
 from app.services.face_service import (
     FaceImageError, FaceProviderUnavailable, FaceService, get_face_provider,
     MultipleFacesDetectedError, NoFaceDetectedError,
@@ -41,8 +42,7 @@ async def enroll(
     major: str | None = Form(default=None),
     admission_year: int | None = Form(default=None),
     session_id: UUID | None = Form(default=None),
-    device_id: UUID | None = Form(default=None),
-    device_code: str | None = Form(default=None),
+    device: Device = Depends(require_kiosk_device),
     db: Session = Depends(get_db),
 ) -> dict:
     storage = MediaStorageService()
@@ -71,20 +71,31 @@ async def enroll(
         raise
 
     try:
-        session = db.get(UserSession, session_id) if session_id else None
-        if session_id and session is None:
-            raise AppError(404, "SESSION_NOT_FOUND", "Không tìm thấy phiên kiosk.")
-        device = db.get(Device, device_id) if device_id else None
-        if device is None and device_code:
-            device = db.scalar(select(Device).where(Device.device_code == device_code))
-
-        user = db.get(User, user_id) if user_id else None
-        if user_id and user is None:
-            raise AppError(404, "USER_NOT_FOUND", "Không tìm thấy người dùng.")
+        session = owned_session(db, session_id, device, required=False, active=True)
+        user = None
+        if user_id:
+            # Re-enrollment may only replace the template of the visitor this kiosk
+            # session has already identified; never an arbitrary account.
+            if session is None or not session.identified or session.user_id != user_id:
+                raise AppError(403, "SESSION_NOT_IDENTIFIED",
+                               "Chỉ có thể đăng ký lại Face ID cho người dùng đã được xác nhận trong phiên này.")
+            user = db.get(User, user_id)
+            if user is None or user.deleted_at is not None:
+                raise AppError(404, "USER_NOT_FOUND", "Không tìm thấy người dùng.")
+        claimed = None
         if user is None and student_code:
-            user = db.scalar(select(User).where(User.student_code == student_code, User.deleted_at.is_(None)))
-        if user is None and email:
-            user = db.scalar(select(User).where(User.email == email, User.deleted_at.is_(None)))
+            claimed = db.scalar(select(User).where(User.student_code == student_code, User.deleted_at.is_(None)))
+        if user is None and claimed is None and email:
+            claimed = db.scalar(select(User).where(User.email == email, User.deleted_at.is_(None)))
+        if claimed is not None:
+            # Typing someone's student code or email must not bind a new face to an
+            # account that already has one. The owner re-enrolls after being recognized.
+            if db.scalar(select(FaceProfile.id).where(
+                FaceProfile.user_id == claimed.id, FaceProfile.active.is_(True), FaceProfile.deleted_at.is_(None),
+            )):
+                raise AppError(409, "FACE_ALREADY_REGISTERED",
+                               "Mã sinh viên hoặc email này đã có Face ID. Vui lòng liên hệ quầy thủ thư.")
+            user = claimed
         if user is None:
             if not full_name or not full_name.strip():
                 raise AppError(422, "FULL_NAME_REQUIRED", "Vui lòng nhập họ và tên để đăng ký khuôn mặt.")
@@ -93,6 +104,13 @@ async def enroll(
                 user_type="STUDENT", account_status="ACTIVE", preferred_language="vi")
             db.add(user)
             db.flush()
+        elif user is claimed:
+            # A claimed profile (pre-registered by staff) keeps its existing values.
+            for field, value in (("full_name", full_name.strip() if full_name else None), ("student_code", student_code),
+                                 ("email", email), ("phone", phone), ("faculty", faculty), ("major", major),
+                                 ("admission_year", admission_year)):
+                if value not in (None, "") and getattr(user, field) in (None, ""):
+                    setattr(user, field, value)
         else:
             if full_name: user.full_name = full_name.strip()
             if student_code: user.student_code = student_code
@@ -124,7 +142,7 @@ async def enroll(
             session.user_id = user.id
             session.identified = True
         record_event(db, event_type="FACE_ENROLLED", session_id=session_id, user_id=user.id,
-            device_id=device.id if device else (session.device_id if session else None), success=True)
+            device_id=device.id, success=True)
         db.commit()
         db.refresh(profile)
         return success_response({"face_profile_id": str(profile.id), "user_id": str(user.id),
@@ -154,14 +172,11 @@ async def enroll(
 
 
 @router.post("/verify")
-async def verify(session_id: UUID | None = Form(default=None), device_code: str | None = Form(default=None),
-                 image_file: UploadFile = File(), db: Session = Depends(get_db)) -> dict:
+async def verify(session_id: UUID | None = Form(default=None), image_file: UploadFile = File(),
+                 device: Device = Depends(require_kiosk_device), db: Session = Depends(get_db)) -> dict:
     storage = MediaStorageService()
     started = perf_counter()
-    session = db.get(UserSession, session_id) if session_id else None
-    device = db.scalar(select(Device).where(Device.device_code == device_code)) if device_code else None
-    if session_id and session is None:
-        raise AppError(404, "SESSION_NOT_FOUND", "Không tìm thấy phiên kiosk.")
+    session = owned_session(db, session_id, device, required=False, active=True)
     try:
         path = await storage.save_image(image_file, "verification")
         provider = get_face_provider()
@@ -186,7 +201,7 @@ async def verify(session_id: UUID | None = Form(default=None), device_code: str 
             attempt = int(db.scalar(select(func.count(FaceAuthenticationLog.id)).where(
                 FaceAuthenticationLog.session_id == session_id)) or 0) + 1
         log = FaceAuthenticationLog(user_id=result.user_id, session_id=session_id,
-            device_id=session.device_id if session else (device.id if device else None), result=result.result,
+            device_id=device.id, result=result.result,
             confidence_score=Decimal(str(result.confidence_score)) if result.confidence_score is not None else None,
             processing_time_ms=processing_ms, attempt_number=attempt,
             failure_reason=None if user else result.result, occurred_at=datetime.now(UTC))

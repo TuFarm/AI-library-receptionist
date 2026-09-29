@@ -160,3 +160,5 @@ button.danger{background:var(--red);color:#fff;border-color:var(--red)}button.da
 .admin-theme[data-theme=dark] :is(.admin-account-menu>button:hover,.admin-account-menu>button:focus-visible){background:#253d5c}
 .admin-theme[data-theme=dark] .admin-account-menu>.admin-menu-logout{color:#ff9292}
 .admin-theme[data-theme=dark] :is(.badge.success,.badge.warning){background:#24483d;color:#b4ead1}
+.device-setup-screen{min-height:100vh}.device-key-form{width:min(620px,100%);grid-template-columns:1fr auto}.device-key-form input{min-height:61px}.device-setup .registration-error{margin-top:14px}
+.admin-key-reveal{border:1px solid var(--line);border-radius:14px;padding:16px;margin:14px 0;background:var(--pale)}.admin-key-reveal code{display:block;word-break:break-all;font-size:14px;margin:8px 0}

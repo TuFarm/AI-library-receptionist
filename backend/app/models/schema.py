@@ -1,4 +1,4 @@
-"""Practical 29-table schema for the AI library kiosk assistant."""
+"""Practical 30-table schema for the AI library kiosk assistant."""
 from __future__ import annotations
 
 import uuid
@@ -95,11 +95,17 @@ class FaceProfile(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
 
 class Device(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     __tablename__ = "devices"
+    __table_args__ = (UniqueConstraint("api_key_hash", name="uq_devices_api_key_hash"),)
 
     device_code: Mapped[str] = mapped_column(String(80), unique=True)
     device_name: Mapped[str] = mapped_column(String(150))
     location: Mapped[str | None] = mapped_column(String(255), index=True)
     status: Mapped[str] = mapped_column(String(30), index=True)
+    # SHA-256 of a high-entropy device key; the raw key is shown to staff once.
+    api_key_hash: Mapped[str | None] = mapped_column(String(64))
+    api_key_prefix: Mapped[str | None] = mapped_column(String(16))
+    api_key_rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class UserSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -548,17 +554,9 @@ class Major(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     department: Mapped[Department] = relationship(back_populates="majors")
 
 
-class KioskDevice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    __tablename__ = "kiosk_devices"
-    device_name: Mapped[str] = mapped_column(String(150))
-    api_key_hash: Mapped[str] = mapped_column(String(255), index=True)  # SHA-256 hashed API key
-    status: Mapped[str] = mapped_column(String(30), default="ACTIVE", index=True)  # ACTIVE, INACTIVE, MAINTENANCE
-    last_ping_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
 class ChatSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "chat_sessions"
-    kiosk_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("kiosk_devices.id", ondelete="SET NULL"), index=True)
+    kiosk_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("devices.id", ondelete="SET NULL"), index=True)
     major_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("majors.id", ondelete="SET NULL"), index=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -580,3 +578,39 @@ class ChatMessage(UUIDPrimaryKeyMixin, Base):
     feedback_score: Mapped[int | None] = mapped_column(Integer)  # -1 dislike, 1 like
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     session: Mapped[ChatSession] = relationship(back_populates="messages")
+
+
+class StaffAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Library staff who sign in to the admin UI. Not a kiosk visitor (`users`)."""
+    __tablename__ = "staff_accounts"
+    __table_args__ = (
+        CheckConstraint("role IN ('admin', 'librarian')"),
+        CheckConstraint("failed_login_count >= 0"),
+    )
+
+    username: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    full_name: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(20), index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    sessions: Mapped[list[StaffSession]] = relationship(back_populates="staff")
+
+
+class StaffSession(UUIDPrimaryKeyMixin, Base):
+    """Revocable admin session; only a SHA-256 digest of the bearer token is stored."""
+    __tablename__ = "staff_sessions"
+    __table_args__ = (CheckConstraint("expires_at > created_at"),)
+
+    staff_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("staff_accounts.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    binding_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    staff: Mapped[StaffAccount] = relationship(back_populates="sessions")

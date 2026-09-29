@@ -41,14 +41,15 @@ class Settings(BaseSettings):
     max_image_upload_mb: int = 5
     max_audio_upload_mb: int = 15
 
-    # Auth settings
-    jwt_secret_key: str = "dev-secret-change-in-production"
-    jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 30
-    jwt_refresh_token_expire_days: int = 7
-    admin_username: str = "admin"
-    admin_password: str = "admin"
-    admin_auth_store_path: Path = Path(__file__).resolve().parents[2] / "storage" / "admin" / "auth.sqlite3"
+    # Staff (admin UI) authentication. Accounts live in PostgreSQL; create the
+    # first one with `python -m scripts.create_staff`.
+    staff_session_minutes: int = Field(default=15, ge=5, le=720)
+    staff_password_iterations: int = Field(default=600_000, ge=1_000)
+    staff_login_max_failures: int = Field(default=5, ge=1, le=50)
+    staff_login_lockout_minutes: int = Field(default=15, ge=1, le=1440)
+    # Kiosk devices authenticate every REST call and the WebSocket with a key
+    # issued from the admin UI. `last_seen_at` is written at most this often.
+    device_last_seen_interval_seconds: int = Field(default=60, ge=0)
 
     @field_validator("database_url", mode="before")
     @classmethod

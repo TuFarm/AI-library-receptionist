@@ -1,25 +1,18 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.schema import Device, UserSession
 from app.services.interaction_service import record_event
 
 
-def start_session(db: Session, device_code: str) -> tuple[UserSession, Device]:
-    device = db.scalar(select(Device).where(Device.device_code == device_code))
-    if device is None:
-        device = Device(device_code=device_code, device_name=device_code, location="Development kiosk", status="active")
-        db.add(device); db.flush()
-    elif device.deleted_at is not None:
-        device.deleted_at = None; device.status = "active"
+def start_session(db: Session, device: Device) -> UserSession:
     session = UserSession(device_id=device.id, user_id=None, identified=False, started_at=datetime.now(UTC))
     db.add(session); db.flush()
     record_event(db, event_type="SESSION_STARTED", session_id=session.id, device_id=device.id)
     db.commit(); db.refresh(session)
-    return session, device
+    return session
 
 
 def end_session(db: Session, session_id: UUID, exit_reason: str) -> UserSession | None:

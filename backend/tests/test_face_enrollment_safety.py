@@ -332,12 +332,15 @@ def test_successful_sface_enrollment_keeps_dlib_profile_for_rollback(
     monkeypatch, tmp_path: Path
 ):
     from app.api.v1.routes import face
-    from app.models.schema import FaceProfile, User
+    from app.models.schema import FaceProfile, User, UserSession
+    from conftest import TEST_DEVICE_ID
 
     user = User(
         id=uuid4(), full_name="Người đã có dlib", user_type="STUDENT",
         account_status="ACTIVE",
     )
+    # Re-enrollment by user_id is only allowed for the visitor identified in this kiosk session.
+    session = SimpleNamespace(id=uuid4(), device_id=TEST_DEVICE_ID, ended_at=None, identified=True, user_id=user.id)
     dlib_profile = FaceProfile(
         id=uuid4(), user_id=user.id, face_template_encrypted=b"dlib-template",
         model_name="face-recognition-hog-128d", model_version="1",
@@ -350,6 +353,8 @@ def test_successful_sface_enrollment_keeps_dlib_profile_for_rollback(
             self.added = []
 
         def get(self, model, identifier):
+            if model is UserSession and identifier == session.id:
+                return session
             return user if model is User and identifier == user.id else None
 
         def scalar(self, query):
@@ -378,7 +383,7 @@ def test_successful_sface_enrollment_keeps_dlib_profile_for_rollback(
     try:
         response = TestClient(app).post(
             "/api/v1/face/enroll",
-            data={"user_id": str(user.id), "full_name": user.full_name},
+            data={"user_id": str(user.id), "session_id": str(session.id), "full_name": user.full_name},
             files={"image_file": ("face.jpg", b"\xff\xd8\xffsafe-test", "image/jpeg")},
         )
         assert response.status_code == 200
@@ -495,25 +500,32 @@ def test_single_face_endpoint_creates_one_user_and_one_profile(monkeypatch, tmp_
 
 
 def test_profile_update_does_not_touch_face_profile(monkeypatch):
-    monkeypatch.setattr(face_service.settings, "admin_username", "test-user")
-    monkeypatch.setattr(face_service.settings, "admin_password", "test-pass")
+    from app.api.v1.routes import kiosk
+    from app.models.schema import User, UserSession
+    from conftest import TEST_DEVICE_ID
     user_id = UUID("11111111-1111-1111-1111-111111111111")
+    session_id = UUID("22222222-2222-2222-2222-222222222222")
     user = SimpleNamespace(id=user_id, student_code="A001", full_name="Người A", email=None,
         phone=None, faculty=None, major=None, admission_year=2024, deleted_at=None,
         user_type="student", account_status="active")
+    session = SimpleNamespace(id=session_id, device_id=TEST_DEVICE_ID, ended_at=None, identified=True, user_id=user_id)
     biometric = object()
 
     class DB:
         def get(self, model, identifier):
-            from app.models.schema import User
-            return user if model is User and identifier == user_id else biometric
+            if model is User and identifier == user_id:
+                return user
+            if model is UserSession and identifier == session_id:
+                return session
+            return biometric
         def scalar(self, _query): return None
         def commit(self): pass
         def refresh(self, _value): pass
 
+    monkeypatch.setattr(kiosk, "record_event", lambda *_args, **_kwargs: None)
     app.dependency_overrides[get_db] = lambda: DB()
     try:
-        response = TestClient(app).patch(f"/api/v1/users/{user_id}", headers={"Authorization": "Basic dGVzdC11c2VyOnRlc3QtcGFzcw=="}, json={
+        response = TestClient(app).patch(f"/api/v1/kiosk/sessions/{session_id}/profile", json={
             "full_name": "Người A đã sửa", "major": "Công nghệ thông tin", "admission_year": 2023,
         })
         assert response.status_code == 200

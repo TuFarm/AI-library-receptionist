@@ -79,19 +79,55 @@ Responses normally use `{ success, message, data }`; errors use `{ success: fals
 
 Read route files for request/response schemas. Endpoint presence does not mean production readiness.
 
-### Basic admin access
+### Access control
 
-Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` in the backend environment (or
-`backend/.env` when starting from that directory). The demo defaults are
-`admin` / `admin`. Open `/admin/dashboard` and enter those credentials. The UI
-keeps them in memory until logout or reload and sends HTTP Basic credentials only
-on staff requests. Do not put them in a `VITE_*` variable or commit them to source control.
+There are two kinds of caller, and every non-public endpoint requires one of them.
 
-All `/admin/*` (except `/admin/login`), `/reports/*`, and non-biometric `/users`
-CRUD endpoints require the configured username/password: missing credentials
-return 401, incorrect credentials 403, and missing server configuration 503.
-This is shared staff access, not per-user JWT/RBAC.
-Existing kiosk and Face ID routes are outside this access-control change.
+**Staff (admin UI).** Accounts live in PostgreSQL (`staff_accounts`) with one of two roles:
+
+| Role | Can do |
+| --- | --- |
+| `librarian` | Dashboard, reports, non-biometric user profile CRUD, departments/majors. |
+| `admin` | Everything a librarian can, plus staff accounts, kiosk devices and Face ID erasure (`DELETE /users/{id}/face-profile`). |
+
+Create the first admin from `backend` after migrating (the password is prompted, or read
+from `STAFF_PASSWORD` for non-interactive deploys such as a Railway shell):
+
+```powershell
+python scripts/create_staff.py --username admin --full-name "Quản trị viên" --role admin
+```
+
+`POST /admin/login` returns an opaque bearer token; only its SHA-256 is stored
+(`staff_sessions`). Sessions last `STAFF_SESSION_MINUTES` (default 15), are bound to the
+browser's random `X-Admin-Device` ID, user agent and client IP, and are revoked on logout,
+password change, password reset, role change or deactivation. Passwords use PBKDF2-SHA256
+(`STAFF_PASSWORD_ITERATIONS`, default 600,000). `STAFF_LOGIN_MAX_FAILURES` wrong passwords
+(default 5) lock the account for `STAFF_LOGIN_LOCKOUT_MINUTES` (default 15). The last active
+admin cannot be demoted or deactivated, and nobody can demote or deactivate themselves.
+Missing/invalid credentials return 401, a wrong role 403.
+
+**Kiosk devices.** An admin registers each kiosk under *Admin → Thiết bị kiosk*; the raw
+key (`kd_…`) is shown once and only its SHA-256 is stored on `devices`. On first start the
+kiosk shows a *Cài đặt thiết bị* screen where staff paste that key; it is kept in the
+kiosk's local storage, never in the web bundle. (`VITE_KIOSK_DEVICE_KEY` is honoured only by
+the Vite dev server, for convenience.) Every kiosk REST call sends `X-Device-Key`; the
+WebSocket sends `{"event": "AUTH", "payload": {"device_key": …}}` as its first message
+(not in the URL, which proxies log) and is closed with 4401 (missing/invalid key) or 4403
+(disabled device or another kiosk's session). Rotating a key invalidates the old one
+immediately; disabling a device blocks it until it is re-enabled.
+
+A kiosk can only act on sessions it started: sessions, conversations, AI turns,
+transcripts, survey submissions and Face ID verification are checked against the
+authenticated device, and a foreign ID is reported as not found. Profile edits and Face ID
+deletion from the kiosk go through `PATCH /kiosk/sessions/{id}/profile` and
+`DELETE /kiosk/sessions/{id}/face-profile`, which act only on the visitor already identified
+in that live session. `POST /face/enroll` accepts `user_id` only for that same identified
+visitor, and refuses (409 `FACE_ALREADY_REGISTERED`) to attach a new face to a student code
+or email whose account already has a Face ID — the owner must be recognized first, or ask a
+librarian. `GET /kiosk/device` lets a kiosk check its key.
+
+Public without credentials: health checks, active survey and book suggestion lookups,
+department/major lookups, and the legacy `/…/mock` demo routes (to be removed in cleanup).
 
 Profile writes accept only name, student code, email, phone, faculty, major and
 admission year. Unknown fields and invalid input return 422; duplicate student
@@ -100,27 +136,27 @@ Deleting a profile deactivates the account and hides it from profile CRUD withou
 deleting its Face ID material. Dashboard totals use the selected number of UTC
 calendar days through the current time; its daily series groups the original sessions
 so it works before any daily aggregate job runs. Reports use the same time window.
-Department/major writes also require staff access; their lookup GET routes remain public.
 
 For the complete backend unit suite, install `backend/requirements-test.txt` instead
 of only the runtime requirements. It adds NumPy and Pillow for test fixtures without
 enabling a native Face ID provider. From `backend`, run
 `python -m pip install -r requirements-test.txt`, then `python -m pytest -q`.
 
-Current clean-database migration limitation: the initial revision validates exactly
-24 tables, while the working model now has 29. Until the migration owner resolves
-that mismatch, `alembic upgrade head` on a new database fails. Creating tables from
-ORM metadata is only a workaround for an isolated disposable demo, not a migration fix.
+Migrations are explicit DDL. The initial revision is frozen to the original 24 tables;
+every later model change needs its own revision. `tests/test_migrations.py` renders
+`alembic upgrade head --sql` offline and fails if any ORM table or column is missing.
 
 ## Data model and boundaries
 
-There are 24 tables:
+There are 30 tables:
 
 - Identity/session: `users`, `user_preferences`, `face_profiles`, `face_authentication_logs`, `devices`, `user_sessions`, `interaction_events`.
 - Knowledge: `knowledge_sources`, `knowledge_documents`, `knowledge_chunks`.
 - Conversation/AI: `conversations`, `conversation_messages`, `prompt_versions`, `ai_requests`, `ai_responses`, `ai_feedback`.
 - Suggestions: `book_categories`, `suggested_books`, `book_suggestion_logs`.
 - Survey/reporting: `surveys`, `survey_questions`, `survey_responses`, `survey_answers`, `daily_report_metrics`.
+- Academic lookups and chat log (admin branch): `departments`, `majors`, `chat_sessions`, `chat_messages`.
+- Staff access: `staff_accounts`, `staff_sessions` (kiosk keys live on `devices`).
 
 Keys are UUIDs. Mutable business/configuration rows use timestamp/soft-delete mixins when appropriate; factual logs are append-only. Unknown visitors are valid (`user_sessions.user_id` and `face_authentication_logs.user_id` are nullable). `student_year` is derived from `admission_year`, never stored.
 
@@ -133,7 +169,7 @@ Knowledge chunks, selected conversation context, feedback, prompt versions, and 
 - `FACE_PROVIDER=mock` runs without native packages. `local` lazily uses `face_recognition`/dlib (CPU HOG, 128-d encodings) and can require CMake/Visual C++ Build Tools on Windows. `local_opencv` is an opt-in YuNet + SFace ONNX provider; it is not the default and never downloads model files at runtime.
 - `VOICE_PROVIDER=mock` is available server-side; kiosk normally uses browser Web Speech/SpeechSynthesis, whose Electron support is not assured.
 - `AI_PROVIDER=mock` is default. `gemini` calls Gemini `generateContent` through `httpx`, with recent context and a Vietnamese receptionist prompt. Provider errors fall back safely to a concise mock answer and are recorded as fallback/failed—not grounded.
-- No vector stack/pgvector, robust document parser, citation-grade RAG, liveness, device authentication, production authorization, or unattended-installation certification exists yet.
+- No vector stack/pgvector, robust document parser, citation-grade RAG, liveness, mTLS/hardware-backed device identity, or unattended-installation certification exists yet. Staff RBAC and per-kiosk keys are described under *Access control*.
 
 Vision quality thresholds are engineering defaults, not calibrated biometric guarantees: HOG detection, IoU tracking, single-face/size/light/blur/eye/pose/stability checks, 500 ms recognition cadence, then three-vote confirmation. Tune only with consented representative testing.
 
@@ -467,9 +503,11 @@ them requires rebuilding the Electron renderer/package.
 
 Set `KIOSK_STREAM_ORIGINS` to the smallest reviewed comma-separated allowlist. Packaged
 Electron currently uses a `file://` renderer and therefore sends the `null` WebSocket origin;
-origin allowlisting alone is not device authentication. Restrict the backend to the kiosk
-VLAN/firewall and add an authenticated kiosk or mTLS boundary before treating a shared or
-hostile LAN as trusted. Do not hard-code server addresses in source or copy ONNX models into
+origin allowlisting alone is not device authentication; each kiosk must also hold its own
+device key (see *Access control*). A key stored on the kiosk can be copied by anyone with
+physical or OS access to it, so still restrict the backend to the kiosk VLAN/firewall and
+consider mTLS before treating a shared or hostile LAN as trusted; rotate a key whenever a
+kiosk is serviced or lost. Do not hard-code server addresses in source or copy ONNX models into
 the Electron package.
 
 The cached OpenCV detector and recognizer are protected by process-local locks because their

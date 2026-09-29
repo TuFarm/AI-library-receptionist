@@ -6,6 +6,8 @@ from app.services.ai_service import AIService
 from app.services.face_service import FaceProviderUnavailable, FaceService
 from app.services.user_service import calculate_student_year
 from fastapi.testclient import TestClient
+
+from conftest import TEST_DEVICE_ID
 from types import SimpleNamespace
 from app.main import app
 from app.core.database import get_db
@@ -168,13 +170,17 @@ def test_ai_answer_endpoint_falls_back_without_gemini_key(monkeypatch):
     from app.services import ai_service
     conversation_id = UUID("66666666-6666-6666-6666-666666666666")
     user_message_id = UUID("77777777-7777-7777-7777-777777777777")
-    fake_conversation = SimpleNamespace(id=conversation_id, user_id=None)
+    session_id = UUID("99999999-9999-4999-8999-999999999999")
+    fake_conversation = SimpleNamespace(id=conversation_id, user_id=None, session_id=session_id)
+    fake_session = SimpleNamespace(id=session_id, device_id=TEST_DEVICE_ID, ended_at=None)
     class EmptyScalars:
         def all(self): return []
     class FakeDB:
         def __init__(self): self.pending = []
         def get(self, model, identifier):
-            from app.models.schema import Conversation
+            from app.models.schema import Conversation, UserSession
+            if model is UserSession and identifier == session_id:
+                return fake_session
             return fake_conversation if model is Conversation and identifier == conversation_id else None
         def scalars(self, _query): return EmptyScalars()
         def add(self, value): self.pending.append(value)
@@ -203,9 +209,13 @@ def test_browser_transcript_endpoint_persists_message_contract(monkeypatch):
     from app.api.v1.routes import voice
     conversation_id = UUID("33333333-3333-3333-3333-333333333333")
     message_id = UUID("44444444-4444-4444-4444-444444444444")
-    fake_conversation = SimpleNamespace(id=conversation_id, session_id=UUID("55555555-5555-5555-5555-555555555555"), user_id=None)
+    session_id = UUID("55555555-5555-5555-5555-555555555555")
+    fake_conversation = SimpleNamespace(id=conversation_id, session_id=session_id, user_id=None)
+    fake_session = SimpleNamespace(id=session_id, device_id=TEST_DEVICE_ID, ended_at=None)
     class FakeDB:
-        def get(self, model, identifier): return fake_conversation
+        def get(self, model, identifier):
+            from app.models.schema import UserSession
+            return fake_session if model is UserSession else fake_conversation
     app.dependency_overrides[get_db] = lambda: FakeDB()
     monkeypatch.setattr(voice, "save_message", lambda *args: SimpleNamespace(id=message_id))
     try:

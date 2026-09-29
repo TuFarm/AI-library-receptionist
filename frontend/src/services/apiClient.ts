@@ -1,5 +1,6 @@
 import type { ActiveSurvey, BookCategory, FaceEnrollmentResult, FaceRegistrationFields, KioskConversation, KioskMessage, KioskSession, KioskUser, SuggestedBook } from "../types/kiosk";
-import { adminHeaders, clearAdminSession, type AdminSession } from "./adminAccess";
+import { adminHeaders, clearAdminSession, type AdminSession, type StaffRole } from "./adminAccess";
+import { deviceHeaders, isDeviceAuthError, reportDeviceUnauthorized } from "./deviceAccess";
 
 type ApiEnvelope<T> = { success: boolean; message: string; data: T; error?: { code: string; details?: unknown } };
 const configuredBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim().replace(/\/$/, "");
@@ -31,14 +32,25 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
   return body.data;
 }
+// Kiosk requests carry the device key; a rejected key sends the kiosk back to device setup.
+async function kioskRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  try { return await request<T>(path, { ...options, headers: { ...deviceHeaders(), ...options.headers } }); }
+  catch (error) {
+    if (error instanceof ApiClientError && isDeviceAuthError(error.code)) reportDeviceUnauthorized(error.code);
+    throw error;
+  }
+}
 export const apiClient = {
-  get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, data: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(data) }),
-  patch: <T>(path: string, data: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(data) }),
-  delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
-  postForm: <T>(path: string, data: FormData) => request<T>(path, { method: "POST", body: data }),
+  get: <T>(path: string) => kioskRequest<T>(path),
+  post: <T>(path: string, data: unknown) => kioskRequest<T>(path, { method: "POST", body: JSON.stringify(data) }),
+  patch: <T>(path: string, data: unknown) => kioskRequest<T>(path, { method: "PATCH", body: JSON.stringify(data) }),
+  delete: <T>(path: string) => kioskRequest<T>(path, { method: "DELETE" }),
+  postForm: <T>(path: string, data: FormData) => kioskRequest<T>(path, { method: "POST", body: data }),
 };
+export type KioskDeviceInfo = { id: string; device_code: string; device_name: string; location: string | null; status: string };
 export const kioskApi = {
+  // Checks a candidate key before it is saved on the kiosk.
+  verifyDevice: (deviceKey: string) => request<KioskDeviceInfo>("/kiosk/device", { headers: { "X-Device-Key": deviceKey } }),
   startSession: (deviceCode: string) => apiClient.post<KioskSession>("/kiosk/sessions/start", { device_code: deviceCode, mode: "kiosk" }),
   endSession: (sessionId: string, exitReason = "COMPLETED") => apiClient.post<{ session_id: string; duration_seconds: number | null; next_state: "IDLE" }>(`/kiosk/sessions/${sessionId}/end`, { exit_reason: exitReason }),
   logEvent: (sessionId: string, event: { event_type: string; input_method?: string; content_summary?: string; success?: boolean }) => apiClient.post<{ event_id: string }>(`/kiosk/sessions/${sessionId}/events`, event),
@@ -58,9 +70,10 @@ export const faceApi = {
     return apiClient.postForm<FaceEnrollmentResult>("/face/enroll", form);
   },
 };
+// Only the visitor identified in the kiosk's own live session can be edited from the kiosk.
 export const userApi = {
-  update: (userId: string, fields: FaceRegistrationFields) => apiClient.patch<KioskUser>(`/users/${userId}`, fields),
-  deleteFaceId: (userId: string) => apiClient.delete<{ user_id: string; deleted_profiles: number }>(`/users/${userId}/face-profile`),
+  update: (sessionId: string, fields: FaceRegistrationFields) => apiClient.patch<KioskUser>(`/kiosk/sessions/${sessionId}/profile`, fields),
+  deleteFaceId: (sessionId: string) => apiClient.delete<{ user_id: string; deleted_profiles: number }>(`/kiosk/sessions/${sessionId}/face-profile`),
 };
 export const voiceApi = {
   sendBrowserTranscript: (payload: { session_id?: string; conversation_id: string; transcript: string; confidence_score?: number }) => apiClient.post<{ message_id: string; transcript: string; provider: string }>("/voice/browser-transcript", payload),
@@ -106,6 +119,44 @@ export const adminApi = {
   changePassword: (current_password: string, new_password: string) => adminClient.post<null>("/admin/password", { current_password, new_password }),
   getDashboard: (days?: number) => adminClient.get<AdminDashboard>(`/admin/dashboard${days ? `?days=${days}` : ""}`),
   getStatus: () => adminClient.get<Array<{ module: string; status: string; warning?: string | null }>>("/admin/status"),
+};
+
+export type StaffAccount = {
+  id: string;
+  username: string;
+  full_name: string;
+  role: StaffRole;
+  is_active: boolean;
+  locked: boolean;
+  last_login_at: string | null;
+  created_at: string | null;
+};
+
+export const staffApi = {
+  list: () => adminClient.get<StaffAccount[]>("/admin/staff"),
+  create: (payload: { username: string; full_name: string; role: StaffRole; password: string }) => adminClient.post<StaffAccount>("/admin/staff", payload),
+  update: (id: string, payload: Partial<Pick<StaffAccount, "full_name" | "role" | "is_active">>) => adminClient.patch<StaffAccount>(`/admin/staff/${id}`, payload),
+  resetPassword: (id: string, new_password: string) => adminClient.post<null>(`/admin/staff/${id}/reset-password`, { new_password }),
+};
+
+export type KioskDevice = {
+  id: string;
+  device_code: string;
+  device_name: string;
+  location: string | null;
+  status: "active" | "disabled";
+  has_key: boolean;
+  key_prefix: string | null;
+  key_rotated_at: string | null;
+  last_seen_at: string | null;
+};
+export type IssuedDeviceKey = KioskDevice & { device_key: string };
+
+export const deviceApi = {
+  list: () => adminClient.get<KioskDevice[]>("/admin/devices"),
+  create: (payload: { device_code: string; device_name: string; location?: string }) => adminClient.post<IssuedDeviceKey>("/admin/devices", payload),
+  update: (id: string, payload: Partial<Pick<KioskDevice, "device_name" | "location" | "status">>) => adminClient.patch<KioskDevice>(`/admin/devices/${id}`, payload),
+  rotateKey: (id: string) => adminClient.post<IssuedDeviceKey>(`/admin/devices/${id}/rotate-key`, {}),
 };
 
 export type AdminDashboard = {

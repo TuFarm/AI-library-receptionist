@@ -1,64 +1,42 @@
-from fastapi import APIRouter, Depends, Query, Header, Request
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-from app.api.deps import require_admin_credentials
-from app.core.errors import AppError
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.responses import success_response
+from app.api.deps import get_current_staff, login_binding, require_staff
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.responses import success_response
 from app.models.schema import AIRequest, FaceAuthenticationLog, InteractionEvent, SurveyResponse, UserSession
+from app.schemas.auth import AdminLoginRequest, AdminPasswordChange
 from app.services.admin_dashboard_service import daily_sessions, report_window
-from app.services.admin_auth_service import create_session, revoke_session, change_password
+from app.services.staff_auth_service import StaffIdentity, change_password, login, revoke_session
 
 login_router = APIRouter()
-router = APIRouter(dependencies=[Depends(require_admin_credentials)])
-
-
-class AdminLoginRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    username: str = Field(min_length=1, max_length=100)
-    password: str = Field(min_length=1, max_length=1024)
-
-
-class AdminPasswordChange(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    current_password: str = Field(min_length=1, max_length=1024)
-    new_password: str = Field(min_length=8, max_length=128)
-
-    @field_validator("new_password")
-    @classmethod
-    def not_blank(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("Mật khẩu mới không được chỉ gồm khoảng trắng.")
-        return value
+router = APIRouter(dependencies=[Depends(require_staff)])
 
 
 @login_router.post("/login")
-def login(credentials: AdminLoginRequest, request: Request,
-          x_admin_device: str = Header(min_length=16, max_length=128)) -> dict:
-    session = create_session(credentials.username, credentials.password,
-                             request.client.host if request.client else "", x_admin_device,
-                             request.headers.get("user-agent", ""))
-    return success_response(session, "Đăng nhập quản trị thành công.")
+def admin_login(credentials: AdminLoginRequest, binding: str = Depends(login_binding),
+                db: Session = Depends(get_db)) -> dict:
+    token, identity = login(db, credentials.username, credentials.password, binding)
+    return success_response({"token": token, **identity.public()}, "Đăng nhập quản trị thành công.")
 
 
 @router.get("/session")
-def session_info(identity: dict = Depends(require_admin_credentials)) -> dict:
-    return success_response(identity)
+def session_info(identity: StaffIdentity = Depends(get_current_staff)) -> dict:
+    return success_response(identity.public())
 
 
 @router.post("/logout")
-def logout(authorization: str = Header(default="")) -> dict:
-    if authorization.startswith("Bearer "):
-        revoke_session(authorization[7:])
+def logout(identity: StaffIdentity = Depends(get_current_staff), db: Session = Depends(get_db)) -> dict:
+    revoke_session(db, identity.token_hash)
     return success_response(None, "Đã đăng xuất.")
 
 
 @router.post("/password")
-def update_password(payload: AdminPasswordChange, identity: dict = Depends(require_admin_credentials)) -> dict:
-    change_password(identity["username"], payload.current_password, payload.new_password)
+def update_password(payload: AdminPasswordChange, identity: StaffIdentity = Depends(get_current_staff),
+                    db: Session = Depends(get_db)) -> dict:
+    change_password(db, identity.id, payload.current_password, payload.new_password)
     return success_response(None, "Đã đổi mật khẩu. Vui lòng đăng nhập lại.")
 
 

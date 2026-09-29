@@ -12,14 +12,16 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
-from app.api.v1.routes.ai import runtime_answer
+from app.api.v1.routes.ai import answer_turn
 from app.api.v1.routes.face import _user_data
-from app.api.v1.routes.voice import browser_transcript
+from app.api.v1.routes.voice import save_browser_transcript
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.core.errors import AppError
 from app.models.schema import Conversation, FaceAuthenticationLog, FaceProfile, User, UserSession
 from app.schemas.ai import AIRuntimeRequest
 from app.schemas.voice import BrowserTranscriptCreate
+from app.services import device_service
 from app.services.face_service import FaceProviderUnavailable, get_face_provider
 from app.services.interaction_service import record_event
 from app.vision.engine import VisionEngine
@@ -30,6 +32,11 @@ from app.vision.session_controller import SessionController
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+AUTH_TIMEOUT_SECONDS = 10
+# Application close codes (4000-4999): the client stops reconnecting on these.
+CLOSE_DEVICE_UNAUTHORIZED = 4401
+CLOSE_DEVICE_FORBIDDEN = 4403
 
 MULTIPLE_FACES_GUIDANCE = "Phát hiện nhiều khuôn mặt. Vui lòng chỉ để một người xuất hiện trong khung hình."
 
@@ -117,11 +124,28 @@ def load_candidates():
         ) for p in profiles]
 
 
-def confirm(session_id, result):
+def authenticate_stream_device(raw_key):
+    """Return the authenticated device ID; raises AppError for a missing, invalid or disabled key."""
+    with SessionLocal() as db:
+        return device_service.authenticate(db, raw_key).id
+
+
+def session_owned_by_device(session_id, device_id) -> bool:
+    try:
+        identifier = UUID(str(session_id))
+    except ValueError:
+        return False
+    with SessionLocal() as db:
+        session = db.get(UserSession, identifier)
+        return session is not None and session.device_id == device_id
+
+
+def confirm(session_id, result, device_id):
     with SessionLocal() as db:
         session = db.get(UserSession, UUID(session_id))
         user = db.get(User, result.user_id)
-        if not session or session.ended_at is not None or not user or user.deleted_at is not None:
+        if (not session or session.device_id != device_id or session.ended_at is not None
+                or not user or user.deleted_at is not None):
             raise ValueError("Session or identity unavailable")
         session.user_id, session.identified = user.id, True
         db.add(FaceAuthenticationLog(user_id=user.id, session_id=session.id, device_id=session.device_id,
@@ -135,20 +159,21 @@ def confirm(session_id, result):
         return payload
 
 
-def answer(payload):
+def answer(payload, device_id):
     with SessionLocal() as db:
         request = AIRuntimeRequest(**payload)
         session = db.get(UserSession, request.session_id)
         conversation = db.get(Conversation, request.conversation_id)
-        if not session or session.ended_at is not None or not conversation or conversation.session_id != session.id:
+        if (not session or session.device_id != device_id or session.ended_at is not None
+                or not conversation or conversation.session_id != session.id):
             raise ValueError("Conversation does not belong to active session")
         if payload.get("input_method") == "VOICE":
-            browser_transcript(BrowserTranscriptCreate(session_id=request.session_id, conversation_id=request.conversation_id,
+            save_browser_transcript(BrowserTranscriptCreate(session_id=request.session_id, conversation_id=request.conversation_id,
                 transcript=request.message_text, confidence_score=payload.get("confidence_score")), db)
             request.save_user_message = False
         else:
             request.save_user_message = True
-        return runtime_answer(request, db)["data"]
+        return answer_turn(request, db)["data"]
 
 
 @router.websocket("/stream")
@@ -163,6 +188,28 @@ async def stream(socket: WebSocket):
         await socket.close(code=1008)
         return
     await socket.accept()
+    # Browsers cannot set headers on a WebSocket, and a key in the URL would end up in
+    # proxy access logs, so the device key arrives in the first message instead.
+    try:
+        first = await asyncio.wait_for(socket.receive(), timeout=AUTH_TIMEOUT_SECONDS)
+        if first["type"] == "websocket.disconnect":
+            return
+        command = json.loads(first.get("text") or "{}")
+        if not isinstance(command, dict) or command.get("event") != "AUTH":
+            raise AppError(401, "DEVICE_KEY_REQUIRED", "Thiết bị kiosk chưa được cấp khóa truy cập.")
+        payload = command.get("payload")
+        device_key = payload.get("device_key") if isinstance(payload, dict) else None
+        device_id = await run_in_threadpool(authenticate_stream_device, device_key if isinstance(device_key, str) else None)
+    except AppError as exc:
+        await socket.close(code=CLOSE_DEVICE_FORBIDDEN if exc.status_code == 403 else CLOSE_DEVICE_UNAUTHORIZED)
+        return
+    except (asyncio.TimeoutError, ValueError):
+        await socket.close(code=CLOSE_DEVICE_UNAUTHORIZED)
+        return
+    except Exception:
+        logger.exception("Kiosk stream authentication failed")
+        await socket.close(code=1011)
+        return
     vision = VisionEngine()
     presence = PresenceDetector()
     controller = SessionController()
@@ -314,6 +361,10 @@ async def stream(socket: WebSocket):
             kind, payload = command.get("event"), command.get("payload", {})
             request_id = command.get("request_id")
             if kind == "CONFIGURE":
+                if payload.get("session_id") and not await run_in_threadpool(
+                        session_owned_by_device, payload["session_id"], device_id):
+                    await socket.close(code=CLOSE_DEVICE_FORBIDDEN)
+                    break
                 next_mode = payload.get("mode", "idle")
                 controller.configure(next_mode, payload.get("session_id"))
                 registration_gate.reset()
@@ -328,7 +379,7 @@ async def stream(socket: WebSocket):
             elif kind == "confirm_identity":
                 proposal = controller.accept(payload.get("session_id"))
                 if proposal:
-                    result = await run_in_threadpool(confirm, controller.session_id, proposal)
+                    result = await run_in_threadpool(confirm, controller.session_id, proposal, device_id)
                     await publisher.publish("identity_confirmed", result)
             elif kind == "AI_REQUEST":
                 try:
@@ -340,7 +391,7 @@ async def stream(socket: WebSocket):
                     if not controller.session_id or payload.get("session_id") != controller.session_id:
                         raise ValueError("Session mismatch")
                     await publisher.publish("ai_processing_started", request_id=request_id)
-                    result = await run_in_threadpool(answer, payload)
+                    result = await run_in_threadpool(answer, payload, device_id)
                     completed_requests[request_id] = result
                     if len(completed_requests) > 32:
                         del completed_requests[next(iter(completed_requests))]

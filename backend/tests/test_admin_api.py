@@ -10,16 +10,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.core.config import settings
 from app.core.database import get_db
 from app.main import app
 from app.models.schema import (
     AIRequest, DailyReportMetric, FaceAuthenticationLog, FaceProfile,
-    InteractionEvent, SurveyResponse, User, UserSession, Department, Major,
+    InteractionEvent, StaffAccount, StaffSession, SurveyResponse, User, UserSession, Department, Major,
 )
+from app.services.staff_auth_service import create_staff
 
 PROFILE = {"student_code": "TEST001", "full_name": "Test Student", "email": "student@example.test"}
-HEADERS = {"Authorization": "Basic dGVzdC11c2VyOnRlc3QtcGFzcw=="}
+DEVICE_HEADER = {"X-Admin-Device": "admin-api-test-device-01"}
 USER_URL = "/api/v1/users"
 MISSING = "11111111-1111-1111-1111-111111111111"
 
@@ -28,21 +28,28 @@ MISSING = "11111111-1111-1111-1111-111111111111"
 def database():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     for model in (User, FaceProfile, UserSession, FaceAuthenticationLog, InteractionEvent,
-                  AIRequest, SurveyResponse, DailyReportMetric, Department, Major):
+                  AIRequest, SurveyResponse, DailyReportMetric, Department, Major, StaffAccount, StaffSession):
         model.__table__.create(engine)
     with Session(engine) as db:
         yield db
     engine.dispose()
 
 
+def signed_in(role: str, database) -> TestClient:
+    create_staff(database, f"test-{role}", f"Test {role}", role, "test-password")
+    database.commit()
+    client = TestClient(app, headers=DEVICE_HEADER)
+    token = client.post("/api/v1/admin/login", json={"username": f"test-{role}", "password": "test-password"}).json()["data"]["token"]
+    client.headers["Authorization"] = f"Bearer {token}"
+    return client
+
+
 @pytest.fixture
-def client(database, monkeypatch):
-    monkeypatch.setattr(settings, "admin_username", "test-user")
-    monkeypatch.setattr(settings, "admin_password", "test-pass")
+def client(database):
     previous = app.dependency_overrides.copy()
     app.dependency_overrides[get_db] = lambda: database
     try:
-        with TestClient(app, headers=HEADERS) as test_client:
+        with signed_in("admin", database) as test_client:
             yield test_client
     finally:
         app.dependency_overrides.clear()
@@ -52,45 +59,75 @@ def client(database, monkeypatch):
 PROTECTED = [
     ("GET", USER_URL), ("POST", USER_URL),
     ("GET", f"{USER_URL}/{MISSING}"), ("PATCH", f"{USER_URL}/{MISSING}"),
-    ("DELETE", f"{USER_URL}/{MISSING}"),
+    ("DELETE", f"{USER_URL}/{MISSING}"), ("DELETE", f"{USER_URL}/{MISSING}/face-profile"),
     ("POST", "/api/v1/departments"), ("PATCH", f"/api/v1/departments/{MISSING}"),
     ("POST", f"/api/v1/departments/{MISSING}/majors"), ("PATCH", f"/api/v1/departments/majors/{MISSING}"),
+    ("GET", "/api/v1/admin/staff"), ("POST", "/api/v1/admin/staff"), ("GET", "/api/v1/admin/devices"),
+    ("POST", "/api/v1/admin/devices"), ("POST", f"/api/v1/admin/devices/{MISSING}/rotate-key"),
     *[("GET", f"/api/v1/{path}") for path in (
-        "admin/dashboard", "admin/dashboard/mock", "admin/status",
+        "admin/dashboard", "admin/dashboard/mock", "admin/status", "admin/session",
         "reports/overview", "reports/overview/mock", "reports/daily",
         "reports/sessions", "reports/feature-status",
     )],
 ]
 
 
+class NoQueries:
+    def __getattr__(self, name):
+        pytest.fail("Requests without a bearer token must be rejected before any query")
+
+
 @pytest.mark.parametrize("method,path", PROTECTED)
-@pytest.mark.parametrize("key,status,code", [
-    (None, 401, "ADMIN_CREDENTIALS_REQUIRED"), ("Basic d3Jvbmc6cHJvbmc=", 403, "ADMIN_ACCESS_DENIED"),
+@pytest.mark.parametrize("key,code", [
+    (None, "ADMIN_CREDENTIALS_REQUIRED"), ("Basic dGVzdDp0ZXN0", "ADMIN_CREDENTIALS_INVALID"),
 ])
-def test_staff_endpoints_require_access_before_database(monkeypatch, method, path, key, status, code):
-    monkeypatch.setattr(settings, "admin_username", "test-user")
-    monkeypatch.setattr(settings, "admin_password", "test-pass")
-    def no_database():
-        pytest.fail("Unauthorized requests must not access the database")
+def test_staff_endpoints_reject_missing_credentials_before_queries(method, path, key, code):
     previous = app.dependency_overrides.copy()
-    app.dependency_overrides[get_db] = no_database
+    app.dependency_overrides[get_db] = NoQueries
     try:
         with TestClient(app) as anonymous:
             response = anonymous.request(method, path, headers={"Authorization": key} if key else {}, json={})
-        assert response.status_code == status
+        assert response.status_code == 401
         assert response.json()["error"]["code"] == code
-        assert "test-pass" not in response.text
     finally:
         app.dependency_overrides.clear()
         app.dependency_overrides.update(previous)
 
 
-@pytest.mark.parametrize("configured", [None, "", "   "])
-def test_missing_configuration_denies_access(client, monkeypatch, configured):
-    monkeypatch.setattr(settings, "admin_username", configured)
-    response = client.get("/api/v1/admin/status")
-    assert response.status_code == 503
-    assert response.json()["error"]["code"] == "ADMIN_AUTH_NOT_CONFIGURED"
+@pytest.mark.parametrize("method,path", PROTECTED)
+def test_unknown_bearer_token_is_rejected(database, method, path):
+    previous = app.dependency_overrides.copy()
+    app.dependency_overrides[get_db] = lambda: database
+    try:
+        with TestClient(app, headers=DEVICE_HEADER) as anonymous:
+            response = anonymous.request(method, path, headers={"Authorization": "Bearer forged-token"}, json={})
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "ADMIN_SESSION_EXPIRED"
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(previous)
+
+
+ADMIN_ONLY = [
+    ("DELETE", f"{USER_URL}/{MISSING}/face-profile"), ("GET", "/api/v1/admin/staff"),
+    ("POST", "/api/v1/admin/staff"), ("GET", "/api/v1/admin/devices"), ("POST", "/api/v1/admin/devices"),
+]
+
+
+def test_librarian_reads_dashboards_but_cannot_manage_access_or_biometrics(database):
+    previous = app.dependency_overrides.copy()
+    app.dependency_overrides[get_db] = lambda: database
+    try:
+        with signed_in("librarian", database) as librarian:
+            assert librarian.get("/api/v1/admin/dashboard").status_code == 200
+            assert librarian.get(USER_URL).status_code == 200
+            for method, path in ADMIN_ONLY:
+                response = librarian.request(method, path, json={})
+                assert response.status_code == 403, path
+                assert response.json()["error"]["code"] == "ADMIN_ROLE_REQUIRED"
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(previous)
 
 
 def test_profile_crud_preserves_biometric_record(client, database):

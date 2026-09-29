@@ -4,6 +4,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
+
+from conftest import TEST_DEVICE_ID
 from starlette.websockets import WebSocketDisconnect
 
 from app.main import app
@@ -152,6 +154,16 @@ def test_crossing_and_multiple_faces_do_not_share_tracks():
     assert [t.id for t in tracks] == [t.id for t in moved]
 
 
+AUTH = {"event": "AUTH", "payload": {"device_key": "kd_test-key"}}
+
+
+@pytest.fixture(autouse=True)
+def authenticated_stream(monkeypatch):
+    """Stream tests focus on vision flow; device-key checks live in test_access_control.py."""
+    monkeypatch.setattr(runtime, "authenticate_stream_device", lambda _key: TEST_DEVICE_ID)
+    monkeypatch.setattr(runtime, "session_owned_by_device", lambda _session_id, _device_id: True)
+
+
 def test_stream_rejects_foreign_origin():
     with TestClient(app) as client:
         with pytest.raises(WebSocketDisconnect):
@@ -163,6 +175,7 @@ def test_registration_config_echoes_capture_generation():
     with TestClient(app) as client, client.websocket_connect(
         "/api/v1/kiosk/stream", headers={"origin": "http://localhost:5173"}
     ) as socket:
+        socket.send_json(AUTH)
         assert socket.receive_json()["event"] == "stream_ready"
         socket.send_json({"event": "CONFIGURE", "payload": {
             "mode": "registration", "session_id": "session-a", "capture_generation": 7,
@@ -201,8 +214,9 @@ def test_confirmation_requires_three_frames_and_client_acceptance(monkeypatch):
         lambda self, image, detections, candidates, quality_accepted: result,
     )
     confirmations = []
-    monkeypatch.setattr(runtime, "confirm", lambda session, match: confirmations.append(session) or {"user": {"id": str(match.user_id)}})
+    monkeypatch.setattr(runtime, "confirm", lambda session, match, device_id: confirmations.append(session) or {"user": {"id": str(match.user_id)}})
     with TestClient(app) as client, client.websocket_connect("/api/v1/kiosk/stream", headers={"origin": "http://localhost:5173"}) as socket:
+        socket.send_json(AUTH)
         assert socket.receive_json()["event"] == "stream_ready"
         socket.send_json({"event": "CONFIGURE", "payload": {"mode": "recognition", "session_id": "test"}})
         read_until(socket, "session_state")
@@ -224,6 +238,7 @@ def test_stream_recovers_from_invalid_frame_without_committing(monkeypatch):
         raise ValueError("bad jpeg")
     monkeypatch.setattr(VisionEngine, "inspect", invalid)
     with TestClient(app) as client, client.websocket_connect("/api/v1/kiosk/stream", headers={"origin": "http://localhost:5173"}) as socket:
+        socket.send_json(AUTH)
         socket.receive_json()
         socket.send_bytes(b"not jpeg")
         events = read_until(socket, "frame_ready")
@@ -250,6 +265,7 @@ def test_production_stream_sends_only_sanitized_guide_geometry(monkeypatch):
     with TestClient(app) as client, client.websocket_connect(
         "/api/v1/kiosk/stream", headers={"origin": "http://localhost:5173"}
     ) as socket:
+        socket.send_json(AUTH)
         socket.receive_json()
         socket.send_json({"event": "CONFIGURE", "payload": {"mode": "recognition"}})
         read_until(socket, "session_state")
@@ -290,6 +306,7 @@ def test_registration_stream_emits_multiple_face_lock_without_quality_good(monke
     with TestClient(app) as client, client.websocket_connect(
         "/api/v1/kiosk/stream", headers={"origin": "http://localhost:5173"}
     ) as socket:
+        socket.send_json(AUTH)
         socket.receive_json()
         socket.send_json({"event": "CONFIGURE", "payload": {"mode": "registration", "session_id": "session-b"}})
         read_until(socket, "session_state")
@@ -327,6 +344,7 @@ def test_registration_second_face_resets_stability_and_single_face_can_restart(m
     with TestClient(app) as client, client.websocket_connect(
         "/api/v1/kiosk/stream", headers={"origin": "http://localhost:5173"}
     ) as socket:
+        socket.send_json(AUTH)
         socket.receive_json()
         socket.send_json({
             "event": "CONFIGURE",

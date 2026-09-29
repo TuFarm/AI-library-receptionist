@@ -1,4 +1,6 @@
-"""add departments kiosk chat
+"""add departments, majors and chat tables
+
+Kiosk devices reuse the existing `devices` table (see 20260929_0001).
 
 Revision ID: a1b2c3d4e5f6
 Revises: 20260902_0001
@@ -48,21 +50,6 @@ def upgrade() -> None:
     op.create_index(op.f('ix_majors_department_id'), 'majors', ['department_id'], unique=False)
     op.create_index(op.f('ix_majors_is_active'), 'majors', ['is_active'], unique=False)
 
-    # kiosk_devices
-    op.create_table(
-        'kiosk_devices',
-        sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-        sa.Column('device_name', sa.String(length=150), nullable=False),
-        sa.Column('api_key_hash', sa.String(length=255), nullable=False),
-        sa.Column('status', sa.String(length=30), nullable=False, server_default='ACTIVE'),
-        sa.Column('last_ping_at', sa.DateTime(timezone=True), nullable=True),
-        sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index(op.f('ix_kiosk_devices_api_key_hash'), 'kiosk_devices', ['api_key_hash'], unique=False)
-    op.create_index(op.f('ix_kiosk_devices_status'), 'kiosk_devices', ['status'], unique=False)
-
     # chat_sessions
     op.create_table(
         'chat_sessions',
@@ -73,7 +60,7 @@ def upgrade() -> None:
         sa.Column('major_id', postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column('started_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.Column('ended_at', sa.DateTime(timezone=True), nullable=True),
-        sa.ForeignKeyConstraint(['kiosk_id'], ['kiosk_devices.id'], ondelete='SET NULL'),
+        sa.ForeignKeyConstraint(['kiosk_id'], ['devices.id'], ondelete='SET NULL'),
         sa.ForeignKeyConstraint(['major_id'], ['majors.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id')
     )
@@ -111,9 +98,6 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_chat_sessions_kiosk_id'), table_name='chat_sessions')
     op.drop_table('chat_sessions')
     
-    op.drop_index(op.f('ix_kiosk_devices_status'), table_name='kiosk_devices')
-    op.drop_index(op.f('ix_kiosk_devices_api_key_hash'), table_name='kiosk_devices')
-    op.drop_table('kiosk_devices')
     
     op.drop_index(op.f('ix_majors_is_active'), table_name='majors')
     op.drop_index(op.f('ix_majors_department_id'), table_name='majors')

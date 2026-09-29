@@ -1,4 +1,5 @@
-export type AdminSession = { token: string; username: string; expires_at: number };
+export type StaffRole = "admin" | "librarian";
+export type AdminSession = { token: string; username: string; expires_at: number; id?: string; full_name?: string; role?: StaffRole };
 export const ADMIN_SESSION_KEY = "nlu.admin.session";
 const DEVICE_KEY = "nlu.admin.device";
 let memorySession: AdminSession | null = null;

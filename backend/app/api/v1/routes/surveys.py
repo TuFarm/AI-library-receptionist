@@ -4,11 +4,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
+from app.api.deps import owned_session, require_kiosk_device
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.responses import success_response
 from app.schemas.survey import SurveySubmission
-from app.models.schema import Survey, SurveyAnswer, SurveyQuestion, SurveyResponse, UserSession
+from app.models.schema import Device, Survey, SurveyAnswer, SurveyQuestion, SurveyResponse
 from app.services.interaction_service import record_event
 
 router = APIRouter()
@@ -35,7 +36,11 @@ def active_database_survey(db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/{survey_id}/responses")
-def submit_database_survey(survey_id: UUID, payload: SurveySubmission, db: Session = Depends(get_db)) -> dict:
+def submit_database_survey(survey_id: UUID, payload: SurveySubmission, device: Device = Depends(require_kiosk_device),
+                           db: Session = Depends(get_db)) -> dict:
+    session = owned_session(db, payload.session_id, device, required=False)
+    if payload.user_id is not None and (session is None or payload.user_id != session.user_id):
+        raise AppError(403, "SESSION_NOT_IDENTIFIED", "Người dùng không thuộc phiên kiosk này.")
     survey = db.get(Survey, survey_id)
     if survey is None or not survey.active: raise AppError(404, "SURVEY_NOT_FOUND", "Không tìm thấy khảo sát đang hoạt động.")
     response = SurveyResponse(survey_id=survey.id, user_id=payload.user_id, session_id=payload.session_id, submitted_at=datetime.now(UTC))
@@ -52,9 +57,8 @@ def submit_database_survey(survey_id: UUID, payload: SurveySubmission, db: Sessi
             except InvalidOperation: answer_text = str(value)
         else: answer_text = str(value)
         db.add(SurveyAnswer(response_id=response.id, question_id=question.id, answer_text=answer_text, answer_number=answer_number)); saved += 1
-    if payload.session_id:
-        session = db.get(UserSession, payload.session_id)
-        record_event(db, event_type="SURVEY_SUBMITTED", session_id=payload.session_id, user_id=payload.user_id,
-            device_id=session.device_id if session else None, content_summary=f"{saved} answers")
+    if session is not None:
+        record_event(db, event_type="SURVEY_SUBMITTED", session_id=session.id, user_id=payload.user_id,
+            device_id=device.id, content_summary=f"{saved} answers")
     db.commit()
     return success_response({"response_id": str(response.id), "survey_id": str(survey.id), "answer_count": saved}, "Cảm ơn bạn đã gửi phản hồi!")

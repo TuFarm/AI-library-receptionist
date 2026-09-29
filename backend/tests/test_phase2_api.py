@@ -45,31 +45,32 @@ def test_mock_face_success_and_unknown_identity():
 
 def test_kiosk_session_flow(monkeypatch):
     from app.api.v1.routes import kiosk
+    from app.core.database import get_db
+    from conftest import TEST_DEVICE_ID
     session_id = UUID("11111111-1111-1111-1111-111111111111")
-    device_id = UUID("22222222-2222-2222-2222-222222222222")
-    monkeypatch.setattr(kiosk, "start_session", lambda db, code: (
-        SimpleNamespace(id=session_id), SimpleNamespace(id=device_id)))
+    session = SimpleNamespace(id=session_id, device_id=TEST_DEVICE_ID, ended_at=None)
+    monkeypatch.setattr(kiosk, "start_session", lambda db, device: SimpleNamespace(id=session_id))
     monkeypatch.setattr(kiosk, "end_session", lambda db, sid, reason: SimpleNamespace(id=sid, duration_seconds=12))
-    started = client.post("/api/v1/kiosk/sessions/start", json={"device_code": "KIOSK_DEV_01", "mode": "kiosk"}).json()["data"]
-    assert started["status"] == "active"
-    assert started["next_state"] == "FACE_SCANNING"
-    ended = client.post(f"/api/v1/kiosk/sessions/{started['session_id']}/end", json={"exit_reason": "COMPLETED"}).json()["data"]
-    assert ended["next_state"] == "IDLE"
+    app.dependency_overrides[get_db] = lambda: SimpleNamespace(get=lambda model, identifier: session)
+    try:
+        started = client.post("/api/v1/kiosk/sessions/start", json={"device_code": "KIOSK_DEV_01", "mode": "kiosk"}).json()["data"]
+        assert started["status"] == "active"
+        assert started["device_id"] == str(TEST_DEVICE_ID)
+        assert started["next_state"] == "FACE_SCANNING"
+        ended = client.post(f"/api/v1/kiosk/sessions/{started['session_id']}/end", json={"exit_reason": "COMPLETED"}).json()["data"]
+        assert ended["next_state"] == "IDLE"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
-def test_mock_report_overview(monkeypatch):
-    from app.core.config import settings
-    monkeypatch.setattr(settings, "admin_username", "test-user")
-    monkeypatch.setattr(settings, "admin_password", "test-pass")
-    data = client.get("/api/v1/reports/overview/mock", headers={"Authorization": "Basic dGVzdC11c2VyOnRlc3QtcGFzcw=="}).json()["data"]
+def test_mock_report_overview(admin_staff):
+    data = client.get("/api/v1/reports/overview/mock").json()["data"]
     assert data["total_sessions"] > 0
     assert data["avg_satisfaction_score"] <= 5
 
 
-def test_admin_dashboard_exposes_operational_metrics(monkeypatch):
+def test_admin_dashboard_exposes_operational_metrics(admin_staff):
     from app.api.v1.routes import admin
-    monkeypatch.setattr(admin.settings, "admin_username", "test-user")
-    monkeypatch.setattr(admin.settings, "admin_password", "test-pass")
 
     class FakeResult:
         def all(self):
@@ -90,7 +91,7 @@ def test_admin_dashboard_exposes_operational_metrics(monkeypatch):
 
     app.dependency_overrides[admin.get_db] = lambda: FakeDatabase()
     try:
-        data = client.get("/api/v1/admin/dashboard", headers={"Authorization": "Basic dGVzdC11c2VyOnRlc3QtcGFzcw=="}).json()["data"]
+        data = client.get("/api/v1/admin/dashboard").json()["data"]
     finally:
         app.dependency_overrides.pop(admin.get_db, None)
 

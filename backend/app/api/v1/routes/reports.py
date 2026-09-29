@@ -6,7 +6,7 @@ Mock endpoints remain available for frontend compatibility.
 from datetime import date, datetime, timedelta, UTC
 
 from fastapi import APIRouter, Depends, Query
-from app.api.deps import require_admin_credentials
+from app.api.deps import require_staff
 from app.core.errors import AppError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -22,7 +22,7 @@ from app.models.schema import (
 )
 from app.services.admin_dashboard_service import report_window
 
-router = APIRouter(dependencies=[Depends(require_admin_credentials)])
+router = APIRouter(dependencies=[Depends(require_staff)])
 
 
 @router.get("/overview/mock")
