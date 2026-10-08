@@ -1,4 +1,4 @@
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy import select
@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.responses import success_response
 from app.models.schema import KnowledgeChunk, KnowledgeDocument
-from app.schemas.knowledge import KnowledgeDocumentUpdate, KnowledgeSearch, KnowledgeTextCreate, MockKnowledgeUpload
+from app.schemas.knowledge import KnowledgeDocumentUpdate, KnowledgeSearch, KnowledgeTextCreate
 from app.services import knowledge_service
 from app.services.rag_service import retrieve
 
@@ -96,24 +96,3 @@ def search(payload: KnowledgeSearch, db: Session = Depends(get_db)) -> dict:
     data = [{**chunk.citation(index), "text": chunk.text, "score": chunk.score}
             for index, chunk in enumerate(chunks, start=1)]
     return success_response(data, "Đã tìm thấy đoạn tri thức phù hợp." if data else "Không có đoạn tri thức phù hợp.")
-
-
-# --- legacy demo routes (removed in cleanup) ------------------------------------------------------
-DOCUMENTS = [
-    {"id": "doc-01", "title": "Nội quy thư viện", "source_type": "PDF", "status": "processed"},
-    {"id": "doc-02", "title": "Giờ mở cửa thư viện", "source_type": "Text", "status": "processed"},
-]
-
-
-@router.get("/sources/mock")
-async def sources() -> dict: return success_response([{"id": "src-01", "name": "Kho tài liệu NLU", "document_count": 2, "status": "active"}])
-
-
-@router.post("/upload/mock")
-async def upload(payload: MockKnowledgeUpload) -> dict:
-    return success_response({"source_id": str(uuid4()), "file_name": payload.file_name, "source_type": payload.source_type,
-        "processing_status": "mock_accepted", "note": "Tệp chưa được lưu hoặc phân tích."}, "Đã mô phỏng tiếp nhận tài liệu")
-
-
-@router.get("/documents/mock")
-async def documents() -> dict: return success_response(DOCUMENTS)

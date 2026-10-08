@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.core.errors import AppError
 from app.models.schema import User
 from app.core.responses import success_response
-from app.schemas.user import MockCurrentUserResponse, UserCreate, UserProfileRead, UserProfileUpdate
+from app.schemas.user import UserCreate, UserProfileUpdate
 from app.services.user_service import (
     apply_profile_update, calculate_student_year, commit_profile, delete_face_profiles,
 )
@@ -67,16 +67,6 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> dict:
     commit_profile(db)
     db.refresh(user)
     return success_response(_admin_user_data(user), "Tạo hồ sơ người dùng thành công.")
-
-@router.get("/me/mock", response_model=MockCurrentUserResponse)
-async def mock_current_user() -> dict:
-    admission_year = 2024
-    user = UserProfileRead(id=UUID("d8f8b7db-56b5-4be5-a136-19eb154ae21f"), student_code="ITCSIU24092",
-        full_name="Phạm Hoàng Tuấn Tú", email="tu.pham@example.edu.vn", phone="0901234567", user_type="student",
-        faculty="Công nghệ thông tin", major="Khoa học máy tính", admission_year=admission_year,
-        calculated_student_year=calculate_student_year(admission_year), account_status="active", preferred_language="vi")
-    return success_response(user.model_dump(mode="json"))
-
 
 @router.get("/{user_id}", dependencies=[Depends(require_staff)])
 def get_user(user_id: UUID, db: Session = Depends(get_db)) -> dict:

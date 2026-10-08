@@ -70,8 +70,8 @@ Responses normally use `{ success, message, data }`; errors use `{ success: fals
 | --- | --- | --- |
 | Health | `GET /health`, `/health`, `/health/db` | DB check executes `SELECT 1`. |
 | Live kiosk | `WS /kiosk/stream`, `POST /kiosk/sessions/start`, `.../{id}/end`, `.../{id}/events` | WebSocket transports vision/runtime events. |
-| Face | `POST /face/enroll`, `/face/verify`, `/face/verify/mock` | Records profiles, auth logs, identity/session events. |
-| Voice/AI | `POST /voice/transcribe`, `/voice/browser-transcript`, `/ai/answer`, `/ai/answer/mock` | Voice save prevents duplicate user messages. |
+| Face | `POST /face/enroll`, `/face/verify` | Records profiles, auth logs, identity/session events. |
+| Voice/AI | `POST /voice/transcribe`, `/voice/browser-transcript`, `/ai/answer` | Voice save prevents duplicate user messages. |
 | Conversations | `POST /conversations/start`, `POST/GET /conversations/{id}/messages` | Session-linked history. |
 | Knowledge | `GET/POST /knowledge/documents`, `POST /knowledge/documents/text`, `GET/PATCH/DELETE /knowledge/documents/{id}`, `POST .../{id}/reprocess`, `POST /knowledge/search` | Staff only. Upload → extract → chunk → BM25 retrieval; see *Knowledge and RAG*. |
 | Books/surveys | categories, suggestions, `GET /surveys/active`, `POST /surveys/{id}/responses` | Answers are validated per question type before anything is stored. |
@@ -127,7 +127,8 @@ or email whose account already has a Face ID — the owner must be recognized fi
 librarian. `GET /kiosk/device` lets a kiosk check its key.
 
 Public without credentials: health checks, active survey and book suggestion lookups,
-department/major lookups, and the legacy `/…/mock` demo routes (to be removed in cleanup).
+and department/major lookups. The old `/…/mock` demo routes and static demo pages have been removed;
+`VITE_ENABLE_MOCK_FALLBACK=true` remains an opt-in offline mode for kiosk UI development only.
 
 Profile writes accept only name, student code, email, phone, faculty, major and
 admission year. Unknown fields and invalid input return 422; duplicate student
@@ -165,6 +166,15 @@ For the complete backend unit suite, install `backend/requirements-test.txt` ins
 of only the runtime requirements. It adds NumPy and Pillow for test fixtures without
 enabling a native Face ID provider. From `backend`, run
 `python -m pip install -r requirements-test.txt`, then `python -m pytest -q`.
+`tests/conftest.py` pins mock providers, the default stream origins and a disabled report job
+before settings load, so a developer's `backend/.env` (real providers, tunnel origins) cannot
+change test results; explicitly exported environment variables still win.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request:
+the backend suite, `alembic upgrade head` → `downgrade base` → `upgrade head` on a PostgreSQL 16
+service, a start-up check against the migrated database, and the frontend `npm ci`, `npm test`
+and `npm run build` (the Electron binary download is skipped). Frontend dependencies are pinned
+with caret ranges and locked in `package-lock.json`.
 
 Migrations are explicit DDL. The initial revision is frozen to the original 24 tables;
 every later model change needs its own revision. `tests/test_migrations.py` renders

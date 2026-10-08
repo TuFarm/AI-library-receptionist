@@ -1,7 +1,16 @@
+import os
 from types import SimpleNamespace
 from uuid import UUID
 
-import pytest
+# Tests must not depend on a developer's backend/.env (real providers, tunnel origins, ...).
+# Process environment variables take precedence over .env in pydantic-settings, so pin the
+# test defaults before the settings object is created; an explicitly exported value still wins.
+for _name, _value in {"FACE_PROVIDER": "mock", "AI_PROVIDER": "mock", "VOICE_PROVIDER": "mock",
+                      "REPORT_JOB_ENABLED": "false", "MEDIA_RETAIN_DEVELOPMENT_FILES": "false",
+                      "KIOSK_STREAM_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173,null"}.items():
+    os.environ.setdefault(_name, _value)
+
+import pytest  # noqa: E402
 
 from app.api.deps import require_kiosk_device
 from app.core.config import settings

@@ -26,21 +26,17 @@ def test_database_health_reports_available_and_unavailable(monkeypatch):
     assert response.json()["error"]["code"] == "DATABASE_UNAVAILABLE"
 
 
-def test_mock_user_and_student_year():
-    user = client.get("/api/v1/users/me/mock").json()["data"]
-    assert user["student_code"] == "ITCSIU24092"
-    assert user["calculated_student_year"] == calculate_student_year(2024)
+def test_student_year_is_derived_from_admission_year():
+    assert calculate_student_year(2024, 2026) == 3
     assert calculate_student_year(None, 2026) is None
     assert calculate_student_year(2027, 2026) is None
 
 
-def test_mock_face_success_and_unknown_identity():
-    success = client.post("/api/v1/face/verify/mock", json={"scenario": "SUCCESS"}).json()["data"]
-    unknown = client.post("/api/v1/face/verify/mock", json={"scenario": "UNKNOWN_FACE"}).json()["data"]
-    assert success["user"]["student_code"] == "ITCSIU24092"
-    assert unknown["user"] is None
-    assert success["next_state"] == "WELCOME"
-    assert unknown["next_state"] == "FACE_UNKNOWN"
+def test_legacy_mock_routes_are_gone():
+    for method, path in (("GET", "/api/v1/users/me/mock"), ("POST", "/api/v1/face/verify/mock"),
+                         ("GET", "/api/v1/surveys/active/mock"), ("GET", "/api/v1/book-categories/mock"),
+                         ("POST", "/api/v1/sessions/mock-start"), ("GET", "/api/v1/knowledge/documents/mock")):
+        assert client.request(method, path, json={}).status_code in {401, 404, 405}, path
 
 
 def test_kiosk_session_flow(monkeypatch):
@@ -61,12 +57,6 @@ def test_kiosk_session_flow(monkeypatch):
         assert ended["next_state"] == "IDLE"
     finally:
         app.dependency_overrides.pop(get_db, None)
-
-
-def test_mock_report_overview(admin_staff):
-    data = client.get("/api/v1/reports/overview/mock").json()["data"]
-    assert data["total_sessions"] > 0
-    assert data["avg_satisfaction_score"] <= 5
 
 
 def test_admin_dashboard_exposes_operational_metrics(admin_staff):

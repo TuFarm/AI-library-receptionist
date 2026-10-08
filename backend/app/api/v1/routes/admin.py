@@ -41,12 +41,6 @@ def update_password(payload: AdminPasswordChange, identity: StaffIdentity = Depe
     return success_response(None, "Đã đổi mật khẩu. Vui lòng đăng nhập lại.")
 
 
-@router.get("/dashboard/mock")
-async def dashboard() -> dict:
-    return success_response({"total_sessions": 1284, "identified_users": 947, "questions": 3260,
-        "ai_answers": 3198, "surveys": 486, "avg_satisfaction": 4.6})
-
-
 @router.get("/dashboard")
 def live_dashboard(
     days: int = Query(default=7, ge=1, le=90),

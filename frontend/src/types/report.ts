@@ -1,1 +1,0 @@
-export type ReportOverview = { total_sessions: number; total_identified_users: number; total_questions: number; total_ai_answers: number; total_surveys: number; avg_satisfaction_score: number; avg_ai_response_time_ms: number };

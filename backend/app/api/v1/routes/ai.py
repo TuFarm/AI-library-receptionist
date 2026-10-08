@@ -10,7 +10,7 @@ from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.responses import success_response
 from app.models.schema import AIRequest, AIResponse, Conversation, ConversationMessage, Device, UserSession
-from app.schemas.ai import AIRuntimeRequest, AIAnswerRequest
+from app.schemas.ai import AIRuntimeRequest
 from app.services.ai_service import AIService
 from app.services.conversation_service import save_message
 from app.services.interaction_service import record_event
@@ -69,11 +69,3 @@ def answer_turn(payload: AIRuntimeRequest, db: Session) -> dict:
     return success_response({"answer": answer.text, "provider": answer.provider, "model_name": answer.model_name,
         "grounded": answer.grounded, "citations": answer.citations, "confidence_score": answer.confidence_score, "latency_ms": latency,
         "warning": answer.warning, "next_state": "AI_VOICE_CHAT"}, "Đã tạo câu trả lời.")
-
-
-@router.post("/answer/mock", dependencies=[Depends(require_kiosk_device)])
-def mock_answer(payload: AIAnswerRequest) -> dict:
-    # May call the real AI provider, so it is not public.
-    answer = AIService().answer(payload.question)
-    return success_response({"question": payload.question, "answer": answer.text, "request_type": "library_qa",
-        "model_name": answer.model_name, "grounded": False, "confidence_score": answer.confidence_score, "latency_ms": 0})

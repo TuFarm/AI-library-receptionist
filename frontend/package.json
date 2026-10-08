@@ -12,20 +12,20 @@
     "electron:build": "npm run build && electron-builder"
   },
   "dependencies": {
-    "react": "latest",
-    "react-dom": "latest",
-    "react-router-dom": "latest"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.3"
   },
   "devDependencies": {
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "@vitejs/plugin-react": "latest",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
     "concurrently": "^10.0.5",
     "electron": "^44.0.0",
     "electron-builder": "^26.15.3",
     "electron-is-dev": "^3.0.1",
-    "typescript": "latest",
-    "vite": "latest",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
     "vitest": "^5.0.0",
     "wait-on": "^9.1.0"
   },

@@ -13,7 +13,7 @@ import ConversationLogsPage from "./pages/admin/ConversationLogsPage";
 import UserManagementPage from "./pages/admin/UserManagementPage";
 import SurveyManagementPage from "./pages/admin/SurveyManagementPage";
 import ReportsPage from "./pages/admin/ReportsPage";
-import { NotFoundPage } from "./pages/Pages";
+import NotFoundPage from "./pages/NotFoundPage";
 
 export default function App(){return <Routes>
   <Route path="/" element={<LandingPage/>}/>

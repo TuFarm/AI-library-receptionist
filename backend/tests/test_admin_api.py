@@ -67,9 +67,9 @@ PROTECTED = [
     ("GET", "/api/v1/admin/staff"), ("POST", "/api/v1/admin/staff"), ("GET", "/api/v1/admin/devices"),
     ("POST", "/api/v1/admin/devices"), ("POST", f"/api/v1/admin/devices/{MISSING}/rotate-key"),
     *[("GET", f"/api/v1/{path}") for path in (
-        "admin/dashboard", "admin/dashboard/mock", "admin/status", "admin/session",
-        "reports/overview", "reports/overview/mock", "reports/daily",
-        "reports/sessions", "reports/feature-status",
+        "admin/dashboard", "admin/status", "admin/session",
+        "reports/overview", "reports/daily", "reports/sessions",
+        "admin/conversations", "admin/surveys", "knowledge/documents",
     )],
 ]
 
