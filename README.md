@@ -73,7 +73,7 @@ Responses normally use `{ success, message, data }`; errors use `{ success: fals
 | Face | `POST /face/enroll`, `/face/verify`, `/face/verify/mock` | Records profiles, auth logs, identity/session events. |
 | Voice/AI | `POST /voice/transcribe`, `/voice/browser-transcript`, `/ai/answer`, `/ai/answer/mock` | Voice save prevents duplicate user messages. |
 | Conversations | `POST /conversations/start`, `POST/GET /conversations/{id}/messages` | Session-linked history. |
-| Knowledge | source/upload/document/search routes | Presently mock/text-match bridge; ingestion/RAG unfinished. |
+| Knowledge | `GET/POST /knowledge/documents`, `POST /knowledge/documents/text`, `GET/PATCH/DELETE /knowledge/documents/{id}`, `POST .../{id}/reprocess`, `POST /knowledge/search` | Staff only. Upload → extract → chunk → BM25 retrieval; see *Knowledge and RAG*. |
 | Books/surveys | categories, suggestions, active survey, responses | Mock and DB-backed paths coexist. |
 | Admin/reporting | admin, reports, users, prompts, interactions | Several functions remain mock/static. |
 
@@ -87,7 +87,7 @@ There are two kinds of caller, and every non-public endpoint requires one of the
 
 | Role | Can do |
 | --- | --- |
-| `librarian` | Dashboard, reports, non-biometric user profile CRUD, departments/majors. |
+| `librarian` | Dashboard, reports, knowledge documents, non-biometric user profile CRUD, departments/majors. |
 | `admin` | Everything a librarian can, plus staff accounts, kiosk devices and Face ID erasure (`DELETE /users/{id}/face-profile`). |
 
 Create the first admin from `backend` after migrating (the password is prompted, or read
@@ -164,12 +164,40 @@ Never store raw face photos in user data. `face_profiles` holds a template/refer
 
 Knowledge chunks, selected conversation context, feedback, prompt versions, and preferences can support RAG and controlled improvement. The system must not silently train itself from DB data. Any training use needs explicit consent, anonymization, governance, and separate approval. `daily_report_metrics` is derived and never replaces raw facts.
 
+## Knowledge and RAG
+
+Staff upload PDF (with a text layer), Word `.docx`, Excel `.xlsx`, TXT, Markdown or CSV files
+(`MAX_KNOWLEDGE_UPLOAD_MB`, default 20), or paste text, under *Admin → Tài liệu tri thức*.
+`knowledge_service` checks the extension and file signature, keeps the original under
+`MEDIA_STORAGE_DIR/knowledge/` for reprocessing, extracts text per PDF page / Excel sheet,
+and packs paragraphs into ~900-character chunks with a 150-character overlap that never
+crosses a page or sheet. Extraction runs inside the request; a failure (scanned PDF, wrong
+encoding, corrupt file) leaves the document with `status=failed` and a Vietnamese
+`processing_error` that staff can see and retry. Spreadsheet rows become `Header: value`
+lines so every chunk stands alone. Deleting is a soft delete; deactivated, deleted or failed
+documents are never retrieved.
+
+`rag_service.retrieve` scores active chunks with BM25 over lower-cased syllables, syllable
+bigrams and accent-stripped syllables (so `gio mo cua` finds `giờ mở cửa`). A chunk must
+cover at least 40% of the question's content-word IDF, and chunks below 40% of the best
+score are dropped; at most `RAG_TOP_K` (default 4) are used. The in-process index is rebuilt
+only when the set of active chunks changes. `POST /knowledge/search` returns exactly what the
+kiosk AI would retrieve, for staff to test documents.
+
+Each AI turn retrieves first. With Gemini, chunks are sent as a numbered `<tai_lieu>` block
+inside the user turn (marked as data, not instructions); the model cites `[n]`, the markers
+are stripped from the spoken text and kept as `citations`. Without Gemini (mock provider, a
+missing key, or a provider error), the answer quotes the best-matching sentences of the top
+chunk verbatim. With no matching chunk, the assistant gives the fixed "chưa được cung cấp tài
+liệu chính thức" reply. `ai_responses.grounded` and `ai_responses.citations` record which
+chunks an answer used, and the kiosk shows them as *Nguồn* under the answer.
+
 ## Providers and limits
 
 - `FACE_PROVIDER=mock` runs without native packages. `local` lazily uses `face_recognition`/dlib (CPU HOG, 128-d encodings) and can require CMake/Visual C++ Build Tools on Windows. `local_opencv` is an opt-in YuNet + SFace ONNX provider; it is not the default and never downloads model files at runtime.
 - `VOICE_PROVIDER=mock` is available server-side; kiosk normally uses browser Web Speech/SpeechSynthesis, whose Electron support is not assured.
 - `AI_PROVIDER=mock` is default. `gemini` calls Gemini `generateContent` through `httpx`, with recent context and a Vietnamese receptionist prompt. Provider errors fall back safely to a concise mock answer and are recorded as fallback/failed—not grounded.
-- No vector stack/pgvector, robust document parser, citation-grade RAG, liveness, mTLS/hardware-backed device identity, or unattended-installation certification exists yet. Staff RBAC and per-kiosk keys are described under *Access control*.
+- No vector stack/pgvector, OCR for scanned PDFs, liveness, mTLS/hardware-backed device identity, or unattended-installation certification exists yet. Staff RBAC and per-kiosk keys are described under *Access control*.
 
 Vision quality thresholds are engineering defaults, not calibrated biometric guarantees: HOG detection, IoU tracking, single-face/size/light/blur/eye/pose/stability checks, 500 ms recognition cadence, then three-vote confirmation. Tune only with consented representative testing.
 

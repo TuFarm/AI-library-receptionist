@@ -22,7 +22,9 @@ export type KioskUser = {
 };
 export type KioskSession = { session_id: string; device_id?: string; status: string; next_state?: KioskState };
 export type KioskConversation = { conversation_id: string; status: string };
-export type KioskMessage = { id: string; role: "user" | "assistant"; text: string; inputMethod?: MessageInputMethod };
+/** A knowledge chunk an AI answer was grounded on. */
+export type Citation = { index: number; chunk_id: string; document_id: string; title: string; page_number: number | null; sheet_name: string | null };
+export type KioskMessage = { id: string; role: "user" | "assistant"; text: string; inputMethod?: MessageInputMethod; citations?: Citation[] };
 export type FaceVerifyResult = {
   result: "SUCCESS" | "UNKNOWN_FACE" | "LOW_CONFIDENCE" | "FAILED" | string;
   user: KioskUser | null; confidence_score: number | null; next_state: "WELCOME" | "FACE_UNKNOWN"; processing_time_ms?: number;

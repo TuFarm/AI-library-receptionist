@@ -1,4 +1,4 @@
-import type { ActiveSurvey, BookCategory, FaceEnrollmentResult, FaceRegistrationFields, KioskConversation, KioskMessage, KioskSession, KioskUser, SuggestedBook } from "../types/kiosk";
+import type { ActiveSurvey, BookCategory, Citation, FaceEnrollmentResult, FaceRegistrationFields, KioskConversation, KioskMessage, KioskSession, KioskUser, SuggestedBook } from "../types/kiosk";
 import { adminHeaders, clearAdminSession, type AdminSession, type StaffRole } from "./adminAccess";
 import { deviceHeaders, isDeviceAuthError, reportDeviceUnauthorized } from "./deviceAccess";
 
@@ -20,7 +20,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   try { body = await response.json() as ApiEnvelope<T>; } catch { /* invalid server response */ }
   if (!response.ok || !body?.success) {
     const fieldErrors: Record<string, string> = {};
-    const labels: Record<string, string> = { username: "Tên đăng nhập", password: "Mật khẩu", current_password: "Mật khẩu hiện tại", new_password: "Mật khẩu mới", full_name: "Họ và tên", student_code: "Mã sinh viên", email: "Email", phone: "Số điện thoại", faculty: "Khoa", major: "Ngành", admission_year: "Năm nhập học" };
+    const labels: Record<string, string> = { username: "Tên đăng nhập", password: "Mật khẩu", current_password: "Mật khẩu hiện tại", new_password: "Mật khẩu mới", full_name: "Họ và tên", student_code: "Mã sinh viên", email: "Email", phone: "Số điện thoại", faculty: "Khoa", major: "Ngành", admission_year: "Năm nhập học", title: "Tiêu đề", content: "Nội dung" };
     if (response.status === 422 && Array.isArray(body?.error?.details)) {
       for (const detail of body.error.details as Array<{ loc?: string[]; type?: string }>) {
         const field = detail.loc?.at(-1);
@@ -84,7 +84,7 @@ export const conversationApi = {
   getMessages: (conversationId: string) => apiClient.get<KioskMessage[]>(`/conversations/${conversationId}/messages`),
 };
 export const aiApi = {
-  answer: (payload: { conversation_id: string; session_id?: string; message_text: string; save_user_message?: boolean }) => apiClient.post<{ answer: string; provider: string; model_name: string; grounded: boolean; warning?: string | null; next_state: "AI_VOICE_CHAT" }>("/ai/answer", payload),
+  answer: (payload: { conversation_id: string; session_id?: string; message_text: string; save_user_message?: boolean }) => apiClient.post<{ answer: string; provider: string; model_name: string; grounded: boolean; citations?: Citation[]; warning?: string | null; next_state: "AI_VOICE_CHAT" }>("/ai/answer", payload),
 };
 export const bookSuggestionApi = {
   getCategories: () => apiClient.get<BookCategory[]>("/book-categories"),
@@ -109,6 +109,7 @@ const adminClient = {
   post: <T>(path: string, data: unknown) => adminRequest<T>(path, { method: "POST", body: JSON.stringify(data) }),
   patch: <T>(path: string, data: unknown) => adminRequest<T>(path, { method: "PATCH", body: JSON.stringify(data) }),
   delete: <T>(path: string) => adminRequest<T>(path, { method: "DELETE" }),
+  postForm: <T>(path: string, data: FormData) => adminRequest<T>(path, { method: "POST", body: data }),
 };
 export const adminApi = {
   verifyAccess: (username: string, password: string) => request<AdminSession>("/admin/login", {
@@ -218,4 +219,36 @@ export type SessionReport = {
 export const reportsApi = {
   getOverview: (days = 7) => adminClient.get<ReportsOverview>(`/reports/overview?days=${days}`),
   getSessions: (days = 7) => adminClient.get<SessionReport>(`/reports/sessions?days=${days}`),
+};
+
+export type KnowledgeDocument = {
+  id: string;
+  title: string;
+  source_type: string;
+  original_file_name: string | null;
+  file_size: number | null;
+  status: "processing" | "processed" | "failed";
+  processing_error: string | null;
+  is_active: boolean;
+  chunk_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+};
+export type KnowledgeChunkPreview = { id: string; index: number; text: string; page_number: number | null; sheet_name: string | null };
+export type KnowledgeSearchHit = Citation & { text: string; score: number };
+
+export const knowledgeApi = {
+  list: (search = "") => adminClient.get<{ items: KnowledgeDocument[]; total: number; max_upload_mb: number }>(`/knowledge/documents?limit=100${search ? `&search=${encodeURIComponent(search)}` : ""}`),
+  get: (id: string) => adminClient.get<KnowledgeDocument & { chunks: KnowledgeChunkPreview[] }>(`/knowledge/documents/${id}`),
+  upload: (file: File, title?: string) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    if (title?.trim()) form.append("title", title.trim());
+    return adminClient.postForm<KnowledgeDocument>("/knowledge/documents", form);
+  },
+  createText: (title: string, content: string) => adminClient.post<KnowledgeDocument>("/knowledge/documents/text", { title: title.trim(), content }),
+  update: (id: string, payload: { title?: string; is_active?: boolean }) => adminClient.patch<KnowledgeDocument>(`/knowledge/documents/${id}`, payload),
+  reprocess: (id: string) => adminClient.post<KnowledgeDocument>(`/knowledge/documents/${id}/reprocess`, {}),
+  remove: (id: string) => adminClient.delete<{ id: string }>(`/knowledge/documents/${id}`),
+  search: (query: string) => adminClient.post<KnowledgeSearchHit[]>("/knowledge/search", { query: query.trim(), top_k: 5 }),
 };

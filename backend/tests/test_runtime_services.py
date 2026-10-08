@@ -192,6 +192,7 @@ def test_ai_answer_endpoint_falls_back_without_gemini_key(monkeypatch):
     monkeypatch.setattr(ai_service.settings, "gemini_api_key", "")
     monkeypatch.setattr(ai, "save_message", lambda *args: SimpleNamespace(id=user_message_id))
     monkeypatch.setattr(ai, "record_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ai, "retrieve", lambda *args: [])  # no knowledge base behind FakeDB
     app.dependency_overrides[get_db] = lambda: FakeDB()
     try:
         response = TestClient(app).post("/api/v1/ai/answer", json={

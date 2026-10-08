@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     Date,
@@ -25,6 +26,9 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, SoftDeleteMixin, TimestampMixin
+
+# JSONB on PostgreSQL (what the migrations create); plain JSON on SQLite test databases.
+PortableJSON = JSON().with_variant(JSONB(), "postgresql")
 
 
 class UUIDPrimaryKeyMixin:
@@ -209,6 +213,7 @@ class KnowledgeSource(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
     status: Mapped[str] = mapped_column(String(40), index=True)
+    processing_error: Mapped[str | None] = mapped_column(Text)
 
     documents: Mapped[list[KnowledgeDocument]] = relationship(back_populates="source")
 
@@ -244,7 +249,7 @@ class KnowledgeChunk(UUIDPrimaryKeyMixin, Base):
     chunk_text: Mapped[str] = mapped_column(Text)
     page_number: Mapped[int | None] = mapped_column(Integer)
     sheet_name: Mapped[str | None] = mapped_column(String(255))
-    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(PortableJSON)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -353,6 +358,8 @@ class AIResponse(UUIDPrimaryKeyMixin, Base):
     response_summary: Mapped[str | None] = mapped_column(Text)
     grounded: Mapped[bool | None] = mapped_column(Boolean)
     confidence_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    # Knowledge chunks the answer was grounded on: [{chunk_id, document_id, title, page_number, sheet_name}].
+    citations: Mapped[list[dict[str, Any]] | None] = mapped_column(PortableJSON)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

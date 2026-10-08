@@ -6,7 +6,7 @@ from app.api.deps import get_current_staff, login_binding, require_staff
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.responses import success_response
-from app.models.schema import AIRequest, FaceAuthenticationLog, InteractionEvent, SurveyResponse, UserSession
+from app.models.schema import AIRequest, KnowledgeDocument, FaceAuthenticationLog, InteractionEvent, SurveyResponse, UserSession
 from app.schemas.auth import AdminLoginRequest, AdminPasswordChange
 from app.services.admin_dashboard_service import daily_sessions, report_window
 from app.services.staff_auth_service import StaffIdentity, change_password, login, revoke_session
@@ -92,10 +92,17 @@ def live_dashboard(
 
 
 @router.get("/status")
-async def status() -> dict:
+def status(db: Session = Depends(get_db)) -> dict:
+    documents = db.scalar(select(func.count(KnowledgeDocument.id)).where(
+        KnowledgeDocument.deleted_at.is_(None), KnowledgeDocument.is_active.is_(True),
+        KnowledgeDocument.processing_status == "processed")) or 0
     return success_response([{"module": "Database", "status": "Completed"},
         {"module": "Kiosk flow", "status": "Realtime"},
         {"module": "FaceID", "status": settings.face_provider,
          "warning": "Chế độ mock chỉ dành cho kiểm thử, không nhận diện danh tính thật."
             if settings.face_provider == "mock" else None},
-        {"module": "Gemini/RAG", "status": "Not implemented"}])
+        {"module": "AI", "status": settings.ai_provider,
+         "warning": "Chế độ mock: câu trả lời được trích nguyên văn từ tài liệu, không dùng mô hình ngôn ngữ."
+            if settings.ai_provider != "gemini" else None},
+        {"module": "RAG", "status": f"{documents} tài liệu",
+         "warning": None if documents else "Chưa có tài liệu tri thức đang hoạt động; AI sẽ từ chối trả lời thông tin chính thức."}])

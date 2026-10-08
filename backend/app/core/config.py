@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     registration_stable_ms: int = 700
     max_image_upload_mb: int = 5
     max_audio_upload_mb: int = 15
+    # Knowledge documents for RAG (PDF, DOCX, XLSX, TXT, MD, CSV) and how many chunks an answer may cite.
+    max_knowledge_upload_mb: int = Field(default=20, ge=1, le=100)
+    rag_top_k: int = Field(default=4, ge=1, le=10)
 
     # Staff (admin UI) authentication. Accounts live in PostgreSQL; create the
     # first one with `python -m scripts.create_staff`.

@@ -8,6 +8,7 @@ import { useKioskFlow } from "../../hooks/useKioskFlow";
 import { useSpeechRecognition } from "../../hooks/useSpeechRecognition";
 import { useTextToSpeech } from "../../hooks/useTextToSpeech";
 import type { MessageInputMethod, VoiceState } from "../../types/kiosk";
+import ChatBubble from "../../components/kiosk/ChatBubble";
 
 const stateLabels: Record<VoiceState, { title: string; detail: string }> = {
   VOICE_IDLE: { title: "Sẵn sàng trò chuyện", detail: "Micro sẽ tự động mở sau lời chào" },
@@ -149,9 +150,7 @@ export default function KioskVoiceChatScreen({ flow }: { flow: ReturnType<typeof
         {(recognition.isListening || voiceState === "USER_SPEAKING") && <ListeningIndicator/>}
       </div>
       <div className="kiosk-chat-log" aria-live="polite">
-        {flow.messages.map((message) => <div className={`kiosk-bubble ${message.role}`} key={message.id}>
-          <span>{message.role === "assistant" ? "☺" : "Bạn"}</span><p>{message.text}</p>
-        </div>)}
+        {flow.messages.map((message) => <ChatBubble key={message.id} message={message} icon="☺"/>)}
         {flow.isProcessing && <div className="kiosk-bubble assistant"><span>☺</span><p>Đang xử lý câu hỏi...</p></div>}
       </div>
     </div>

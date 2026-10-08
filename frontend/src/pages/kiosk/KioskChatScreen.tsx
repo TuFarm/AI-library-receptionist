@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { VoiceInputButton } from "../../components/kiosk/VoiceInputButton";
 import { useKioskFlow } from "../../hooks/useKioskFlow";
 import { useSpeechRecognition } from "../../hooks/useSpeechRecognition";
+import ChatBubble from "../../components/kiosk/ChatBubble";
 
 const quickQuestions = [
   "Thư viện mở cửa lúc mấy giờ?", "Wifi thư viện là gì?", "Khu vực học nhóm ở đâu?",
@@ -32,9 +33,7 @@ export default function KioskChatScreen({ flow }: { flow: ReturnType<typeof useK
       <span className="kiosk-kicker">TRỢ LÝ AI THƯ VIỆN</span><h1>Bạn muốn hỏi gì về thư viện?</h1>
     </div><button className="kiosk-ghost" onClick={flow.openBooks}>◇ Gợi ý sách</button></div>
     <div className="kiosk-chat-log" aria-live="polite">
-      {flow.messages.map((message) => <div className={`kiosk-bubble ${message.role}`} key={message.id}>
-        <span>{message.role === "assistant" ? "✦" : "Bạn"}</span><p>{message.text}</p>
-      </div>)}
+      {flow.messages.map((message) => <ChatBubble key={message.id} message={message} icon="✦"/>)}
       {flow.isProcessing && <div className="kiosk-bubble assistant"><span>✦</span><p>Đang tìm câu trả lời…</p></div>}
     </div>
     <div className="kiosk-chips">{quickQuestions.map((question) =>

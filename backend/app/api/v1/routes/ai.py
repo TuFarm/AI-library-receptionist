@@ -14,6 +14,7 @@ from app.schemas.ai import AIRuntimeRequest, AIAnswerRequest
 from app.services.ai_service import AIService
 from app.services.conversation_service import save_message
 from app.services.interaction_service import record_event
+from app.services.rag_service import retrieve
 
 router = APIRouter()
 
@@ -44,9 +45,12 @@ def answer_turn(payload: AIRuntimeRequest, db: Session) -> dict:
             ConversationMessage.sender_type == "USER",
         ).order_by(ConversationMessage.message_time.desc())
     )
-    started = perf_counter(); answer = AIService().answer(payload.message_text, history); latency = int((perf_counter() - started) * 1000)
+    started = perf_counter()
+    context = retrieve(db, payload.message_text)
+    answer = AIService().answer(payload.message_text, history, context)
+    latency = int((perf_counter() - started) * 1000)
     request = AIRequest(conversation_id=conversation.id, user_message_id=user_message.id if user_message else None,
-        request_type="library_qa", model_name=answer.model_name, input_token_count=None,
+        request_type="library_qa_rag" if context else "library_qa", model_name=answer.model_name, input_token_count=None,
         output_token_count=None, latency_ms=latency,
         status="failed" if answer.provider_error else ("fallback" if answer.used_fallback else "completed"))
     db.add(request); db.flush()
@@ -54,7 +58,8 @@ def answer_turn(payload: AIRuntimeRequest, db: Session) -> dict:
         input_method="SYSTEM", message_time=datetime.now(UTC))
     db.add(ai_message); db.flush()
     response = AIResponse(ai_request_id=request.id, ai_message_id=ai_message.id, response_text=answer.text,
-        response_summary=answer.text[:500], grounded=answer.grounded, confidence_score=answer.confidence_score)
+        response_summary=answer.text[:500], grounded=answer.grounded, confidence_score=answer.confidence_score,
+        citations=answer.citations or None)
     db.add(response)
     session = db.get(UserSession, payload.session_id) if payload.session_id else None
     record_event(db, event_type="AI_ANSWERED", session_id=payload.session_id, user_id=conversation.user_id,
@@ -62,7 +67,7 @@ def answer_turn(payload: AIRuntimeRequest, db: Session) -> dict:
         content_summary=answer.text[:500], success=not answer.used_fallback)
     db.commit()
     return success_response({"answer": answer.text, "provider": answer.provider, "model_name": answer.model_name,
-        "grounded": answer.grounded, "confidence_score": answer.confidence_score, "latency_ms": latency,
+        "grounded": answer.grounded, "citations": answer.citations, "confidence_score": answer.confidence_score, "latency_ms": latency,
         "warning": answer.warning, "next_state": "AI_VOICE_CHAT"}, "Đã tạo câu trả lời.")
 
 

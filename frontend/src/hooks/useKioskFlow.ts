@@ -5,7 +5,7 @@ import { RuntimeEvent as Events } from "../runtime/events";
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { KIOSK_TIMING } from "../config/kioskRuntime";
 import { conversationApi, faceApi, kioskApi, MOCK_FALLBACK_ENABLED, userApi } from "../services/apiClient";
-import type { CameraStatus, FaceRegistrationFields, FaceVerifyResult, KioskAction, KioskConversation, KioskFlowState, KioskMessage, KioskState, MessageInputMethod, MicStatus } from "../types/kiosk";
+import type { CameraStatus, Citation, FaceRegistrationFields, FaceVerifyResult, KioskAction, KioskConversation, KioskFlowState, KioskMessage, KioskState, MessageInputMethod, MicStatus } from "../types/kiosk";
 
 const DEVICE_CODE = String(import.meta.env.VITE_KIOSK_DEVICE_CODE ?? "KIOSK_DEV_01");
 const FALLBACK_ANSWER = "Máy chủ đang tạm thời không phản hồi. Đây là chế độ thử nghiệm ngoại tuyến; vui lòng khởi động backend để nhận câu trả lời từ hệ thống.";
@@ -200,7 +200,7 @@ export function useKioskFlow(timeoutSeconds = Number(import.meta.env.VITE_KIOSK_
         message_text: clean, input_method: inputMethod, confidence_score: confidence,
       });
       if (currentEpoch !== epoch.current) return null;
-      dispatch({ type: "AI_RESPONSE_RECEIVED", message: { id: crypto.randomUUID(), role: "assistant", text: String(result.answer) }, mockFallback: result.provider === "mock" });
+      dispatch({ type: "AI_RESPONSE_RECEIVED", message: { id: crypto.randomUUID(), role: "assistant", text: String(result.answer), citations: Array.isArray(result.citations) ? result.citations as Citation[] : [] }, mockFallback: result.provider === "mock" });
       return String(result.answer);
     } catch (reason) {
       if (currentEpoch !== epoch.current) return null;
