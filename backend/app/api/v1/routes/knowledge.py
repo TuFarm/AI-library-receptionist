@@ -47,9 +47,10 @@ def list_documents(search: str = Query(default="", max_length=200), status: str 
 
 
 @staff_router.post("/documents", status_code=201)
-async def upload_document(file: UploadFile = File(), title: str | None = Form(default=None, max_length=500),
-                          db: Session = Depends(get_db)) -> dict:
-    data = await file.read(settings.max_knowledge_upload_mb * 1024 * 1024 + 1)
+def upload_document(file: UploadFile = File(), title: str | None = Form(default=None, max_length=500),
+                    db: Session = Depends(get_db)) -> dict:
+    # Sync on purpose: PDF/Word/Excel parsing runs in the threadpool, not on the kiosk WebSocket's event loop.
+    data = file.file.read(settings.max_knowledge_upload_mb * 1024 * 1024 + 1)
     document = knowledge_service.create_from_upload(db, file_name=file.filename or "", data=data,
                                                      mime_type=file.content_type, title=title)
     return success_response(_single(db, document), _saved_message(document, "Đã tải lên và xử lý tài liệu."))

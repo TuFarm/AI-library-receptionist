@@ -73,11 +73,19 @@ def _extractive_answer(question: str, context: list[RetrievedChunk], warning: st
         provider_error=provider_error, citations=[best.citation(1)])
 
 
+_DELIMITER = re.compile(r"</?\s*tai_lieu\s*>", re.IGNORECASE)
+
+
+def _neutralize(text: str) -> str:
+    """A document must not be able to close the <tai_lieu> data block early."""
+    return _DELIMITER.sub("", text)
+
+
 def _context_block(context: list[RetrievedChunk]) -> str:
     parts = []
     for index, chunk in enumerate(context, start=1):
         where = f", trang {chunk.page_number}" if chunk.page_number else (f", trang tính {chunk.sheet_name}" if chunk.sheet_name else "")
-        parts.append(f"[{index}] {chunk.title}{where}\n{chunk.text}")
+        parts.append(f"[{index}] {_neutralize(chunk.title)}{where}\n{_neutralize(chunk.text)}")
     return "<tai_lieu>\n" + "\n\n".join(parts) + "\n</tai_lieu>"
 
 
