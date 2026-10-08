@@ -3,9 +3,18 @@ import { CountdownAnimation, ScanningAnimation } from "../../components/kiosk/Ki
 import { CameraPreview } from "../../components/kiosk/CameraPreview";
 import type { CameraStatus, FaceGuideRect, FaceRegistrationFields, KioskUser } from "../../types/kiosk";
 
-type WizardStep = "identity" | "academic" | "capture" | "processing";
-const newUserProgress = ["Thông tin", "Nhận diện khuôn mặt", "Xử lý", "Hoàn tất"];
-const reenrollmentProgress = ["Nhận diện khuôn mặt", "Xử lý", "Hoàn tất"];
+type WizardStep = "identity" | "academic" | "consent" | "capture" | "processing";
+const newUserProgress = ["Thông tin", "Đồng ý", "Nhận diện khuôn mặt", "Xử lý", "Hoàn tất"];
+const reenrollmentProgress = ["Đồng ý", "Nhận diện khuôn mặt", "Xử lý", "Hoàn tất"];
+
+/** Must match the backend FACE_CONSENT_VERSION; bump both whenever this text changes. */
+export const FACE_CONSENT_VERSION = "2026-10";
+export const FACE_CONSENT_POINTS = [
+  "Thư viện chỉ lưu một mẫu số hóa của khuôn mặt (không lưu ảnh chụp) để nhận ra bạn ở các lần sau.",
+  "Mẫu khuôn mặt chỉ dùng để chào và cá nhân hóa trợ lý tại kiosk, không dùng cho mục đích khác.",
+  "Bạn có thể xóa Face ID bất cứ lúc nào tại kiosk (mục hồ sơ) hoặc nhờ thủ thư.",
+  "Không đồng ý thì bạn vẫn dùng trợ lý bình thường với tư cách khách.",
+];
 
 export function registrationFieldsForUser(user: KioskUser): FaceRegistrationFields {
   return {
@@ -26,13 +35,15 @@ export default function FaceRegistrationScreen({ videoRef, cameraStatus, cameraE
   onCancel: () => void;
 }) {
   const reenrollment = Boolean(existingUser);
-  const [step, setStep] = useState<WizardStep>(() => reenrollment ? "capture" : "identity");
+  const [step, setStep] = useState<WizardStep>(() => reenrollment ? "consent" : "identity");
+  const [consented, setConsented] = useState(false);
   const [fields, setFields] = useState<FaceRegistrationFields>(() => existingUser
     ? registrationFieldsForUser(existingUser) : { full_name: "" });
   const enrolling = useRef(false);
   const [error, setError] = useState("");
   const progressSteps = reenrollment ? reenrollmentProgress : newUserProgress;
-  const activeStep = reenrollment ? (step === "processing" ? 2 : 1) : step === "capture" ? 2 : step === "processing" ? 3 : 1;
+  const order: WizardStep[] = reenrollment ? ["consent", "capture", "processing"] : ["academic", "consent", "capture", "processing"];
+  const activeStep = Math.max(order.indexOf(step), 0) + 1;
   const update = (name: keyof FaceRegistrationFields, value: string) => setFields((current) => ({
     ...current, [name]: name === "admission_year" ? (value ? Number(value) : undefined) : value,
   }));
@@ -40,14 +51,14 @@ export default function FaceRegistrationScreen({ videoRef, cameraStatus, cameraE
   function next(event: FormEvent) {
     event.preventDefault(); setError("");
     if (!fields.full_name.trim()) { setError("Vui lòng nhập họ và tên."); return; }
-    setStep(step === "identity" ? "academic" : "capture");
+    setStep(step === "identity" ? "academic" : "consent");
   }
 
   async function capture() {
-    if (enrolling.current || busy || cameraStatus !== "READY" || !capturePrepared || !qualityReady || faceCount !== 1 || multipleFacesDetected) return;
+    if (!consented || enrolling.current || busy || cameraStatus !== "READY" || !capturePrepared || !qualityReady || faceCount !== 1 || multipleFacesDetected) return;
     enrolling.current = true;
     setError(""); setStep("processing");
-    try { await onEnroll(fields, await captureFrame()); }
+    try { await onEnroll({ ...fields, face_consent: true }, await captureFrame()); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Không thể đăng ký khuôn mặt."); setStep("capture"); }
     finally { enrolling.current = false; }
   }
@@ -82,6 +93,16 @@ export default function FaceRegistrationScreen({ videoRef, cameraStatus, cameraE
       </div>
       {error && <div className="registration-error" role="alert">{error}</div>}
       <div className="registration-actions">{step === "academic" && <button type="button" className="kiosk-ghost" onClick={() => setStep("identity")}>Quay lại</button>}<button>Tiếp tục</button><button type="button" className="kiosk-ghost" onClick={onCancel}>Hủy đăng ký</button></div>
+    </form> : null}
+    {step === "consent" ? <form className="registration-step-card consent-card" onSubmit={(event) => { event.preventDefault(); if (consented) setStep("capture"); }}>
+      <span className="kiosk-kicker">{reenrollment ? "ĐĂNG KÝ LẠI FACE ID" : "BƯỚC 2 · ĐỒNG Ý"}</span>
+      <h1>Đồng ý lưu mẫu khuôn mặt</h1>
+      {reenrollment && <p>Đang thay Face ID cho {existingUser?.full_name}. Thông tin hồ sơ hiện tại sẽ được giữ nguyên.</p>}
+      <ul className="consent-points">{FACE_CONSENT_POINTS.map((point) => <li key={point}>{point}</li>)}</ul>
+      <label className="consent-check"><input type="checkbox" checked={consented} onChange={(event) => setConsented(event.target.checked)}/>
+        <span>Tôi đã đọc và đồng ý cho thư viện lưu mẫu khuôn mặt của tôi theo các điều trên (phiên bản {FACE_CONSENT_VERSION}).</span></label>
+      <div className="registration-actions">{!reenrollment && <button type="button" className="kiosk-ghost" onClick={() => setStep("academic")}>Quay lại</button>}
+        <button disabled={!consented}>Đồng ý và tiếp tục</button><button type="button" className="kiosk-ghost" onClick={onCancel}>{reenrollment ? "Quay lại hồ sơ" : "Không đồng ý"}</button></div>
     </form> : null}
     {step === "capture" ? <div className="registration-capture-step">
       <div className="registration-camera"><CameraPreview videoRef={videoRef} status={cameraStatus} error={cameraError}

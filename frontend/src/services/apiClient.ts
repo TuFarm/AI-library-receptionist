@@ -76,6 +76,12 @@ export const userApi = {
   deleteFaceId: (sessionId: string) => apiClient.delete<{ user_id: string; deleted_profiles: number }>(`/kiosk/sessions/${sessionId}/face-profile`),
 };
 export const voiceApi = {
+  /** Server-side STT for one recorded utterance (used where Web Speech is unavailable, e.g. Electron). */
+  transcribe: (audio: Blob) => {
+    const form = new FormData();
+    form.append("audio_file", audio, "utterance.webm");
+    return apiClient.postForm<{ transcript: string; provider: string; confidence_score: number | null; warning: string | null }>("/voice/transcribe", form);
+  },
   sendBrowserTranscript: (payload: { session_id?: string; conversation_id: string; transcript: string; confidence_score?: number }) => apiClient.post<{ message_id: string; transcript: string; provider: string }>("/voice/browser-transcript", payload),
 };
 export const conversationApi = {

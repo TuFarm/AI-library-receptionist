@@ -42,9 +42,13 @@ async def enroll(
     major: str | None = Form(default=None),
     admission_year: int | None = Form(default=None),
     session_id: UUID | None = Form(default=None),
+    face_consent: bool = Form(default=False),
     device: Device = Depends(require_kiosk_device),
     db: Session = Depends(get_db),
 ) -> dict:
+    # No biometric processing at all without the visitor's explicit consent.
+    if not face_consent:
+        raise AppError(422, "FACE_CONSENT_REQUIRED", "Vui lòng đồng ý với điều khoản lưu mẫu khuôn mặt trước khi đăng ký.")
     storage = MediaStorageService()
     try:
         path = await storage.save_image(image_file, "enrollments")
@@ -138,6 +142,8 @@ async def enroll(
         profile.model_name = result.model_name
         profile.model_version = result.model_version
         profile.quality_score = Decimal(str(result.quality_score))
+        user.face_consent_at = datetime.now(UTC)
+        user.face_consent_version = settings.face_consent_version
         if session:
             session.user_id = user.id
             session.identified = True

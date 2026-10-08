@@ -232,10 +232,10 @@ def test_enrollment_cannot_claim_another_persons_face_id(admin, use_db, real_dev
         headers = {"X-Device-Key": key_a}
         image = {"image_file": ("face.jpg", b"\xff\xd8\xfftest", "image/jpeg")}
         session_id = kiosk.post("/api/v1/kiosk/sessions/start", json={}, headers=headers).json()["data"]["session_id"]
-        claimed = kiosk.post("/api/v1/face/enroll", data={"session_id": session_id, "full_name": "Kẻ giả mạo",
+        claimed = kiosk.post("/api/v1/face/enroll", data={"face_consent": "true", "session_id": session_id, "full_name": "Kẻ giả mạo",
                                                           "student_code": victim.student_code}, files=image, headers=headers)
         assert claimed.status_code == 409 and claimed.json()["error"]["code"] == "FACE_ALREADY_REGISTERED"
-        by_id = kiosk.post("/api/v1/face/enroll", data={"session_id": session_id, "user_id": str(victim.id)},
+        by_id = kiosk.post("/api/v1/face/enroll", data={"face_consent": "true", "session_id": session_id, "user_id": str(victim.id)},
                            files=image, headers=headers)
         assert by_id.status_code == 403 and by_id.json()["error"]["code"] == "SESSION_NOT_IDENTIFIED"
     use_db.expire_all()

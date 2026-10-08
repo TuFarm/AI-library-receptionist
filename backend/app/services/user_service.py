@@ -55,5 +55,8 @@ def delete_face_profiles(db: Session, user_id: UUID) -> int:
     for profile in profiles:
         # Explicit user-confirmed hard deletion removes the biometric material.
         db.delete(profile)
+    user = db.get(User, user_id)
+    if user is not None:
+        user.face_consent_at = user.face_consent_version = None
     db.commit()
     return len(profiles)

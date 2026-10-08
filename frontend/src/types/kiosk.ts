@@ -31,6 +31,8 @@ export type FaceVerifyResult = {
 };
 export type FaceRegistrationFields = {
   full_name: string; student_code?: string; email?: string; phone?: string; faculty?: string; major?: string; admission_year?: number;
+  /** Sent only with Face ID enrollment, after the visitor accepted the consent step. */
+  face_consent?: boolean;
 };
 export type FaceEnrollmentResult = {
   face_profile_id: string; user_id: string; user: KioskUser; provider: string; quality_score: number; next_state: "WELCOME";

@@ -92,6 +92,10 @@ describe("kiosk recognition and welcome UI", () => {
       onCaptureStart={noRef} onCaptureEnd={noRef} onEnroll={async () => undefined} onCancel={noRef}/>);
     expect(html).toContain("ĐĂNG KÝ LẠI FACE ID");
     expect(html).toContain("Thông tin hồ sơ hiện tại sẽ được giữ nguyên");
+    // Re-enrollment also starts with the consent step; the camera step is not rendered yet.
+    expect(html).toContain("Đồng ý lưu mẫu khuôn mặt");
+    expect(html).toMatch(/<button disabled="">Đồng ý và tiếp tục<\/button>/);
+    expect(html).not.toContain("Nhìn thẳng vào camera");
     expect(html).not.toContain("Cho chúng tôi biết về bạn");
     expect(html).not.toContain("Sửa thông tin");
   });

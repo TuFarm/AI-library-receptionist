@@ -60,7 +60,9 @@ Only active Face ID states send JPEG frames to `WS /api/v1/kiosk/stream`; only o
 
 Realtime frames remain in memory. Camera requests 1920×1080 preferably (1280×720 minimum); backend limits frames to 2.5 MB and 1920×1080. Idle motion pixels are processed locally and are never logged, stored, or sent. Face ID quality, enrollment evidence, unknown-recognition, tracking, and confirmation guards remain authoritative. The IDLE rotating tips are a typed static list in `frontend/src/content/kioskIdleFacts.ts` and require no database/admin data.
 
-Voice is turn-based, not Gemini Live/full-duplex: greeting → browser STT (`vi-VN`) → final transcript → AI request → browser TTS → listening. Keyboard input is always a fallback. Raw microphone audio is not sent through the WebSocket.
+Voice is turn-based, not Gemini Live/full-duplex: greeting → STT (`vi-VN`) → final transcript → AI request → browser TTS → listening. Keyboard input is always a fallback, and every answer is also shown as text. Raw microphone audio is not sent through the WebSocket.
+
+`VITE_VOICE_INPUT` picks the STT source: `auto` (default) uses browser Web Speech, except in Electron, which exposes `webkitSpeechRecognition` without a working speech service; there the kiosk records one utterance with `MediaRecorder` (it ends after 1.2 s of silence, 15 s at most, and is discarded if nobody spoke) and posts it to `POST /voice/transcribe`. `browser` or `server` force one source. Server STT needs `VOICE_PROVIDER=gemini` and `GEMINI_API_KEY`: the utterance is sent inline to the configured `GEMINI_MODEL`, the temporary file is deleted afterwards (unless `MEDIA_RETAIN_DEVELOPMENT_FILES`), and a failure or silence returns an empty transcript rather than a guess. Enabling it sends visitors' voice to Google, so the deployment's privacy notice must say so. The mock provider returns a fixed sentence for tests; the kiosk refuses to submit it as a question unless `VITE_ENABLE_MOCK_FALLBACK=true`. Speech output still uses the OS voices behind `speechSynthesis`; install a Vietnamese voice on Electron kiosks.
 
 ## API
 
@@ -194,7 +196,11 @@ There are 30 tables:
 
 Keys are UUIDs. Mutable business/configuration rows use timestamp/soft-delete mixins when appropriate; factual logs are append-only. Unknown visitors are valid (`user_sessions.user_id` and `face_authentication_logs.user_id` are nullable). `student_year` is derived from `admission_year`, never stored.
 
-Never store raw face photos in user data. `face_profiles` holds a template/reference only. The local development adapter stores a serialized embedding and is **not** production encryption. A real deployment needs consent, managed encryption keys, liveness/anti-spoofing, RBAC, audit, retention/deletion, and demographic performance validation.
+Never store raw face photos in user data. `face_profiles` holds a template/reference only. The local development adapter stores a serialized embedding and is **not** production encryption. A real deployment still needs managed encryption keys, liveness/anti-spoofing, audit, a retention policy, and demographic performance validation.
+
+**Consent.** Before the camera step of any enrollment (new or re-enrollment) the kiosk shows what is stored, why, and how to erase it, and requires an explicit tick. `POST /face/enroll` rejects a request without `face_consent=true` (422 `FACE_CONSENT_REQUIRED`) before the image is saved or analysed, and on success records `users.face_consent_at` and `users.face_consent_version` (`FACE_CONSENT_VERSION`, which must match `FACE_CONSENT_VERSION` in `FaceRegistrationScreen.tsx`; bump both when the text changes). Erasing the Face ID from the kiosk or the admin UI also clears the consent record.
+
+**Liveness is not implemented.** Nothing distinguishes a live face from a printed photo or a screen. This is a deliberate, documented gap: a heuristic (blink or head-turn checks) would give a false sense of security. Real anti-spoofing needs a dedicated, calibrated presentation-attack-detection model validated on consented data. Until then, treat Face ID as a convenience greeting, never as authentication for anything sensitive.
 
 Knowledge chunks, selected conversation context, feedback, prompt versions, and preferences can support RAG and controlled improvement. The system must not silently train itself from DB data. Any training use needs explicit consent, anonymization, governance, and separate approval. `daily_report_metrics` is derived and never replaces raw facts.
 
@@ -229,7 +235,7 @@ chunks an answer used, and the kiosk shows them as *Nguồn* under the answer.
 ## Providers and limits
 
 - `FACE_PROVIDER=mock` runs without native packages. `local` lazily uses `face_recognition`/dlib (CPU HOG, 128-d encodings) and can require CMake/Visual C++ Build Tools on Windows. `local_opencv` is an opt-in YuNet + SFace ONNX provider; it is not the default and never downloads model files at runtime.
-- `VOICE_PROVIDER=mock` is available server-side; kiosk normally uses browser Web Speech/SpeechSynthesis, whose Electron support is not assured.
+- `VOICE_PROVIDER=gemini` provides server-side STT for Electron kiosks (see *Kiosk flow*); `mock` is for tests only, and `browser` disables server STT.
 - `AI_PROVIDER=mock` is default. `gemini` calls Gemini `generateContent` through `httpx`, with recent context and a Vietnamese receptionist prompt. Provider errors fall back safely to a concise mock answer and are recorded as fallback/failed—not grounded.
 - No vector stack/pgvector, OCR for scanned PDFs, liveness, mTLS/hardware-backed device identity, or unattended-installation certification exists yet. Staff RBAC and per-kiosk keys are described under *Access control*.
 

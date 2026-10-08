@@ -216,7 +216,7 @@ def post_opencv_enrollment(monkeypatch, tmp_path: Path, database, provider):
     app.dependency_overrides[get_db] = lambda: database
     return TestClient(app).post(
         "/api/v1/face/enroll",
-        data={"full_name": "Người OpenCV"},
+        data={"face_consent": "true", "full_name": "Người OpenCV"},
         files={"image_file": ("face.jpg", b"\xff\xd8\xffsafe-test", "image/jpeg")},
     )
 
@@ -383,7 +383,7 @@ def test_successful_sface_enrollment_keeps_dlib_profile_for_rollback(
     try:
         response = TestClient(app).post(
             "/api/v1/face/enroll",
-            data={"user_id": str(user.id), "session_id": str(session.id), "full_name": user.full_name},
+            data={"face_consent": "true", "user_id": str(user.id), "session_id": str(session.id), "full_name": user.full_name},
             files={"image_file": ("face.jpg", b"\xff\xd8\xffsafe-test", "image/jpeg")},
         )
         assert response.status_code == 200
@@ -411,7 +411,7 @@ def test_opencv_missing_models_returns_503_before_database_access(monkeypatch, t
     try:
         response = TestClient(app).post(
             "/api/v1/face/enroll",
-            data={"full_name": "Người OpenCV"},
+            data={"face_consent": "true", "full_name": "Người OpenCV"},
             files={"image_file": ("face.jpg", b"\xff\xd8\xffsafe-test", "image/jpeg")},
         )
         assert response.status_code == 503
@@ -434,7 +434,7 @@ def test_multiple_faces_fail_before_user_or_profile_access(monkeypatch, tmp_path
     )
     app.dependency_overrides[get_db] = lambda: database
     try:
-        response = TestClient(app).post("/api/v1/face/enroll", data={"full_name": "Người B"},
+        response = TestClient(app).post("/api/v1/face/enroll", data={"face_consent": "true", "full_name": "Người B"},
             files={"image_file": ("two.jpg", b"\xff\xd8\xffsafe-test", "image/jpeg")})
         assert response.status_code == 422
         assert response.json()["error"] == {"code": "MULTIPLE_FACES_DETECTED", "details": {"face_count": 2}}
@@ -455,7 +455,7 @@ def test_zero_faces_fail_before_user_or_profile_access(monkeypatch, tmp_path: Pa
     )
     app.dependency_overrides[get_db] = lambda: database
     try:
-        response = TestClient(app).post("/api/v1/face/enroll", data={"full_name": "Người B"},
+        response = TestClient(app).post("/api/v1/face/enroll", data={"face_consent": "true", "full_name": "Người B"},
             files={"image_file": ("none.jpg", b"\xff\xd8\xffsafe-test", "image/jpeg")})
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "NO_FACE_DETECTED"
@@ -487,7 +487,7 @@ def test_single_face_endpoint_creates_one_user_and_one_profile(monkeypatch, tmp_
     monkeypatch.setattr(face, "record_event", lambda *_args, **_kwargs: None)
     app.dependency_overrides[get_db] = lambda: database
     try:
-        response = TestClient(app).post("/api/v1/face/enroll", data={"full_name": "Người A"},
+        response = TestClient(app).post("/api/v1/face/enroll", data={"face_consent": "true", "full_name": "Người A"},
             files={"image_file": ("one.jpg", b"\xff\xd8\xffsafe-test", "image/jpeg")})
         assert response.status_code == 200
         assert len([value for value in database.added if isinstance(value, User)]) == 1
@@ -495,6 +495,27 @@ def test_single_face_endpoint_creates_one_user_and_one_profile(monkeypatch, tmp_
         assert len(profiles) == 1
         assert profiles[0].model_name == "face-recognition-hog-128d"
         assert profiles[0].model_version == "1"
+        user = next(value for value in database.added if isinstance(value, User))
+        assert user.face_consent_at is not None and user.face_consent_version == face.settings.face_consent_version
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("consent", [None, "false"])
+def test_enrollment_without_consent_never_touches_the_image(monkeypatch, tmp_path: Path, consent):
+    from app.api.v1.routes import face
+    database = NoWriteDB()
+    monkeypatch.setattr(face.settings, "media_storage_dir", tmp_path)
+    monkeypatch.setattr(face.FaceService, "prepare_enrollment",
+                        lambda _self, _path: pytest.fail("biometric processing without consent"))
+    app.dependency_overrides[get_db] = lambda: database
+    data = {"full_name": "Người A", **({"face_consent": consent} if consent else {})}
+    try:
+        response = TestClient(app).post("/api/v1/face/enroll", data=data,
+            files={"image_file": ("one.jpg", b"\xff\xd8\xffsafe-test", "image/jpeg")})
+        assert response.status_code == 422 and response.json()["error"]["code"] == "FACE_CONSENT_REQUIRED"
+        assert database.accesses == database.writes == 0
+        assert not list(tmp_path.rglob("*.jpg"))
     finally:
         app.dependency_overrides.clear()
 

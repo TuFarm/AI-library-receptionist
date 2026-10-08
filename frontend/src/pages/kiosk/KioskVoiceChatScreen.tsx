@@ -6,6 +6,7 @@ import { AssistantAvatar, ListeningIndicator } from "../../components/kiosk/Kios
 import { canActivateMicrophone, KIOSK_TIMING, wait } from "../../config/kioskRuntime";
 import { useKioskFlow } from "../../hooks/useKioskFlow";
 import { useSpeechRecognition } from "../../hooks/useSpeechRecognition";
+import { chooseVoiceInput, useServerSpeechRecognition } from "../../hooks/useServerSpeechRecognition";
 import { useTextToSpeech } from "../../hooks/useTextToSpeech";
 import type { MessageInputMethod, VoiceState } from "../../types/kiosk";
 import ChatBubble from "../../components/kiosk/ChatBubble";
@@ -69,7 +70,14 @@ export default function KioskVoiceChatScreen({ flow }: { flow: ReturnType<typeof
     }
   }, [flow.submitMessage, flow.setMicStatus, tts.isSpeaking]);
 
-  const recognition = useSpeechRecognition((text, confidence) => { void processTurn(text, confidence, "VOICE"); });
+  const onVoiceTranscript = (text: string, confidence?: number) => { void processTurn(text, confidence, "VOICE"); };
+  const browserRecognition = useSpeechRecognition(onVoiceTranscript);
+  const serverRecognition = useServerSpeechRecognition(onVoiceTranscript);
+  const inputMode = chooseVoiceInput(import.meta.env.VITE_VOICE_INPUT as string | undefined, {
+    browserSpeech: browserRecognition.isSupported, mediaRecorder: serverRecognition.isSupported,
+    electron: typeof navigator !== "undefined" && /electron/i.test(navigator.userAgent),
+  });
+  const recognition = inputMode === "server" ? serverRecognition : { ...browserRecognition, isSupported: inputMode === "browser" };
   recognitionControlRef.current = {
     start: recognition.startListening, stop: recognition.stopListening, supported: recognition.isSupported,
   };

@@ -54,6 +54,9 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     major: Mapped[str | None] = mapped_column(String(150), index=True)
     admission_year: Mapped[int | None] = mapped_column(Integer, index=True)
     student_level_label: Mapped[str | None] = mapped_column(String(80))
+    # Explicit Face ID consent given at enrollment; cleared when the Face ID is erased.
+    face_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    face_consent_version: Mapped[str | None] = mapped_column(String(20))
 
     preferences: Mapped[list[UserPreference]] = relationship(back_populates="user")
     face_profiles: Mapped[list[FaceProfile]] = relationship(back_populates="user")
