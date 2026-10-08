@@ -35,6 +35,8 @@ export default function AdminDashboardPage() {
       <MetricCard icon="?" label="Câu hỏi" value={data.questions.toLocaleString("vi-VN")} detail={`${data.ai_answers.toLocaleString("vi-VN")} câu trả lời AI`}/>
       <MetricCard icon="✓" label="Khảo sát" value={data.surveys.toLocaleString("vi-VN")} detail="Phản hồi đã gửi"/>
       <MetricCard icon="◷" label="Thời gian chờ nhận diện" value={`${data.avg_wait_seconds}s`} detail="Thời gian xử lý trung bình"/>
+      <MetricCard icon="★" label="Mức hài lòng" value={data.avg_satisfaction != null ? `${data.avg_satisfaction.toLocaleString("vi-VN")} / 5` : "—"} detail="Trung bình điểm khảo sát"/>
+      <MetricCard icon="▤" label="Trả lời có nguồn" value={`${data.grounded_rate}%`} detail={`${data.grounded_answers.toLocaleString("vi-VN")} câu trả lời dựa trên tài liệu`}/>
       <MetricCard icon="!" label="Lỗi camera/network" value={data.camera_network_errors.toLocaleString("vi-VN")} detail="Sự kiện lỗi hạ tầng"/>
     </div>
     <section className="panel"><div className="panel-head"><h2>Hoạt động {days} ngày gần nhất</h2><span className="badge success">Dữ liệu thật</span></div>

@@ -13,8 +13,9 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import get_db
 from app.main import app
 from app.models.schema import (
-    AIRequest, DailyReportMetric, FaceAuthenticationLog, FaceProfile,
-    InteractionEvent, StaffAccount, StaffSession, SurveyResponse, User, UserSession, Department, Major,
+    AIRequest, AIResponse, DailyReportMetric, FaceAuthenticationLog, FaceProfile,
+    InteractionEvent, StaffAccount, StaffSession, Survey, SurveyAnswer, SurveyQuestion, SurveyResponse, User,
+    UserSession, Department, Major,
 )
 from app.services.staff_auth_service import create_staff
 
@@ -28,7 +29,8 @@ MISSING = "11111111-1111-1111-1111-111111111111"
 def database():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     for model in (User, FaceProfile, UserSession, FaceAuthenticationLog, InteractionEvent,
-                  AIRequest, SurveyResponse, DailyReportMetric, Department, Major, StaffAccount, StaffSession):
+                  AIRequest, AIResponse, Survey, SurveyQuestion, SurveyResponse, SurveyAnswer, DailyReportMetric,
+                  Department, Major, StaffAccount, StaffSession):
         model.__table__.create(engine)
     with Session(engine) as db:
         yield db

@@ -4,6 +4,8 @@ from app.api.v1.routes import runtime
 from app.api.v1.routes import (
     admin,
     admin_access,
+    admin_conversations,
+    admin_surveys,
     ai,
     book_suggestions,
     conversations,
@@ -27,6 +29,8 @@ api_router.include_router(runtime.router, prefix="/kiosk", tags=["kiosk-stream"]
 api_router.include_router(admin.login_router, prefix="/admin", tags=["admin"])
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(admin_access.router, prefix="/admin", tags=["admin-access"])
+api_router.include_router(admin_conversations.router, prefix="/admin/conversations", tags=["admin-conversations"])
+api_router.include_router(admin_surveys.router, prefix="/admin/surveys", tags=["admin-surveys"])
 api_router.include_router(kiosk.router, prefix="/kiosk", tags=["kiosk"])
 api_router.include_router(health.router, prefix="/health", tags=["health"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])

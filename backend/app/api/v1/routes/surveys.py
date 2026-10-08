@@ -1,5 +1,4 @@
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
 from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -11,6 +10,7 @@ from app.core.responses import success_response
 from app.schemas.survey import SurveySubmission
 from app.models.schema import Device, Survey, SurveyAnswer, SurveyQuestion, SurveyResponse
 from app.services.interaction_service import record_event
+from app.services.survey_service import parse_answer
 
 router = APIRouter()
 
@@ -42,21 +42,20 @@ def submit_database_survey(survey_id: UUID, payload: SurveySubmission, device: D
     if payload.user_id is not None and (session is None or payload.user_id != session.user_id):
         raise AppError(403, "SESSION_NOT_IDENTIFIED", "Người dùng không thuộc phiên kiosk này.")
     survey = db.get(Survey, survey_id)
-    if survey is None or not survey.active: raise AppError(404, "SURVEY_NOT_FOUND", "Không tìm thấy khảo sát đang hoạt động.")
-    response = SurveyResponse(survey_id=survey.id, user_id=payload.user_id, session_id=payload.session_id, submitted_at=datetime.now(UTC))
-    db.add(response); db.flush()
-    saved = 0
+    if survey is None or not survey.active or survey.deleted_at is not None: raise AppError(404, "SURVEY_NOT_FOUND", "Không tìm thấy khảo sát đang hoạt động.")
+    # Validate every answer before writing anything, so a rejected submission leaves no rows.
+    parsed = []
     for question_id_text, value in payload.answers.items():
         try: question_id = UUID(question_id_text)
         except ValueError as exc: raise AppError(422, "INVALID_QUESTION_ID", f"Mã câu hỏi không hợp lệ: {question_id_text}") from exc
         question = db.scalar(select(SurveyQuestion).where(SurveyQuestion.id == question_id, SurveyQuestion.survey_id == survey.id))
         if question is None: raise AppError(422, "QUESTION_NOT_FOUND", "Câu hỏi không thuộc khảo sát này.")
-        answer_text = None; answer_number = None
-        if isinstance(value, (int, float)):
-            try: answer_number = Decimal(str(value))
-            except InvalidOperation: answer_text = str(value)
-        else: answer_text = str(value)
-        db.add(SurveyAnswer(response_id=response.id, question_id=question.id, answer_text=answer_text, answer_number=answer_number)); saved += 1
+        parsed.append((question, *parse_answer(question, value)))
+    response = SurveyResponse(survey_id=survey.id, user_id=payload.user_id, session_id=payload.session_id, submitted_at=datetime.now(UTC))
+    db.add(response); db.flush()
+    for question, answer_text, answer_number in parsed:
+        db.add(SurveyAnswer(response_id=response.id, question_id=question.id, answer_text=answer_text, answer_number=answer_number))
+    saved = len(parsed)
     if session is not None:
         record_event(db, event_type="SURVEY_SUBMITTED", session_id=session.id, user_id=payload.user_id,
             device_id=device.id, content_summary=f"{saved} answers")

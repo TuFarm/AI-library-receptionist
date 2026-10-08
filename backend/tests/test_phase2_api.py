@@ -78,7 +78,9 @@ def test_admin_dashboard_exposes_operational_metrics(admin_staff):
 
     class FakeDatabase:
         def __init__(self):
-            self.values = iter([10, 4, 20, 18, 5, 8, 6, 250, 3])
+            # sessions, identified, questions, AI answers, surveys, attempts, successes, wait ms,
+            # satisfaction, answered, grounded, camera/network errors
+            self.values = iter([10, 4, 20, 18, 5, 8, 6, 250, 4.5, 10, 7, 3])
 
         def scalar(self, _query):
             return next(self.values)
@@ -101,3 +103,5 @@ def test_admin_dashboard_exposes_operational_metrics(admin_staff):
     assert data["recognition_success_rate"] == 75.0
     assert data["avg_wait_seconds"] == 0.25
     assert data["camera_network_errors"] == 3
+    assert data["avg_satisfaction"] == 4.5
+    assert (data["grounded_answers"], data["grounded_rate"]) == (7, 70.0)

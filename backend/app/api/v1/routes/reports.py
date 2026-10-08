@@ -21,6 +21,7 @@ from app.models.schema import (
     UserSession,
 )
 from app.services.admin_dashboard_service import report_window
+from app.services.report_service import aggregate_range
 
 router = APIRouter(dependencies=[Depends(require_staff)])
 
@@ -121,6 +122,27 @@ def report_overview(
     })
 
 
+def _metric_data(m: DailyReportMetric) -> dict:
+    return {
+        "date": m.report_date.isoformat(),
+        "total_sessions": m.total_sessions,
+        "identified_users": m.total_identified_users,
+        "total_questions": m.total_questions,
+        "total_ai_answers": m.total_ai_answers,
+        "total_surveys": m.total_surveys,
+        "avg_satisfaction_score": float(m.avg_satisfaction_score) if m.avg_satisfaction_score is not None else None,
+        "avg_ai_response_time_ms": float(m.avg_ai_response_time_ms) if m.avg_ai_response_time_ms is not None else None,
+    }
+
+
+@router.post("/daily/rebuild")
+def rebuild_daily(days: int = Query(default=7, ge=1, le=90), db: Session = Depends(get_db)) -> dict:
+    """Recompute the aggregate for the last N UTC days from the raw logs (safe to repeat)."""
+    end = datetime.now(UTC).date()
+    rows = aggregate_range(db, end - timedelta(days=days - 1), end)
+    return success_response({"metrics": [_metric_data(row) for row in rows]}, f"Đã tổng hợp lại {days} ngày.")
+
+
 @router.get("/daily")
 def report_daily(
     start_date: date | None = None,
@@ -143,23 +165,7 @@ def report_daily(
     ).all()
 
     return success_response({
-        "metrics": [
-            {
-                "date": m.report_date.isoformat(),
-                "total_sessions": m.total_sessions,
-                "identified_users": m.total_identified_users,
-                "total_questions": m.total_questions,
-                "total_ai_answers": m.total_ai_answers,
-                "total_surveys": m.total_surveys,
-                "avg_satisfaction_score": (
-                    float(m.avg_satisfaction_score) if m.avg_satisfaction_score else None
-                ),
-                "avg_ai_response_time_ms": (
-                    float(m.avg_ai_response_time_ms) if m.avg_ai_response_time_ms is not None else None
-                ),
-            }
-            for m in rows
-        ],
+        "metrics": [_metric_data(m) for m in rows],
         "period": {
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),

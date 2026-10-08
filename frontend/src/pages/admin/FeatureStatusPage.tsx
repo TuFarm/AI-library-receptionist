@@ -4,6 +4,11 @@ import { adminApi } from "../../services/apiClient";
 
 type ModuleStatus = { module: string; status: string; warning?: string | null };
 
+export function statusTone(item: ModuleStatus): "success" | "warning" | "danger" {
+  if (item.status === "mock") return "danger";
+  return item.warning ? "warning" : "success";
+}
+
 export default function FeatureStatusPage() {
   const [modules, setModules] = useState<ModuleStatus[]>([]);
   const [loading, setLoading] = useState(true);
@@ -20,6 +25,6 @@ export default function FeatureStatusPage() {
   return <><PageHeader eyebrow="TRẠNG THÁI RUNTIME" title="Trạng thái tính năng" description="Theo dõi ranh giới giữa runtime thử nghiệm và tích hợp production."/>
     {loading ? <section className="panel loading-state">Đang tải trạng thái…</section> : error ? <section className="panel empty-state"><p role="alert">{error}</p><button onClick={() => setRetry(value => value + 1)}>Thử lại</button></section> : <section className="panel feature-list">{modules.map(item => <div className="status-row" key={item.module}>
       <div><strong>{item.module}</strong>{item.warning && <small>{item.warning}</small>}</div>
-      <span className={`badge ${item.status === "mock" ? "danger" : "warning"}`}>{item.status}</span>
+      <span className={`badge ${statusTone(item)}`}>{item.status}</span>
     </div>)}</section>}</>;
 }

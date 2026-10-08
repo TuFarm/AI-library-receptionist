@@ -1,11 +1,27 @@
+import asyncio
+import contextlib
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.core.database import SessionLocal
 from app.core.errors import register_error_handlers
 from app.core.responses import success_response
 from app.services.face_service import get_face_provider
+from app.services.report_service import report_scheduler
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    task = asyncio.create_task(report_scheduler(SessionLocal)) if settings.report_job_enabled else None
+    yield
+    if task:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 def create_app() -> FastAPI:
@@ -13,7 +29,7 @@ def create_app() -> FastAPI:
     # has entered the kiosk flow. Mock and legacy local remain lazily loaded.
     if settings.face_provider == "local_opencv":
         get_face_provider("local_opencv")
-    app = FastAPI(title=settings.app_name, version="0.1.0")
+    app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[

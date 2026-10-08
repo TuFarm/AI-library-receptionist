@@ -74,8 +74,8 @@ Responses normally use `{ success, message, data }`; errors use `{ success: fals
 | Voice/AI | `POST /voice/transcribe`, `/voice/browser-transcript`, `/ai/answer`, `/ai/answer/mock` | Voice save prevents duplicate user messages. |
 | Conversations | `POST /conversations/start`, `POST/GET /conversations/{id}/messages` | Session-linked history. |
 | Knowledge | `GET/POST /knowledge/documents`, `POST /knowledge/documents/text`, `GET/PATCH/DELETE /knowledge/documents/{id}`, `POST .../{id}/reprocess`, `POST /knowledge/search` | Staff only. Upload → extract → chunk → BM25 retrieval; see *Knowledge and RAG*. |
-| Books/surveys | categories, suggestions, active survey, responses | Mock and DB-backed paths coexist. |
-| Admin/reporting | admin, reports, users, prompts, interactions | Several functions remain mock/static. |
+| Books/surveys | categories, suggestions, `GET /surveys/active`, `POST /surveys/{id}/responses` | Answers are validated per question type before anything is stored. |
+| Admin/reporting | `/admin/dashboard`, `/admin/status`, `/admin/conversations`, `/admin/surveys`, `/reports/overview`, `/reports/sessions`, `/reports/daily`, `POST /reports/daily/rebuild`, `/users` | Staff only; see *Surveys, conversation logs and daily reports*. |
 
 Read route files for request/response schemas. Endpoint presence does not mean production readiness.
 
@@ -87,7 +87,7 @@ There are two kinds of caller, and every non-public endpoint requires one of the
 
 | Role | Can do |
 | --- | --- |
-| `librarian` | Dashboard, reports, knowledge documents, non-biometric user profile CRUD, departments/majors. |
+| `librarian` | Dashboard, reports, knowledge documents, conversation logs, surveys, non-biometric user profile CRUD, departments/majors. |
 | `admin` | Everything a librarian can, plus staff accounts, kiosk devices and Face ID erasure (`DELETE /users/{id}/face-profile`). |
 
 Create the first admin from `backend` after migrating (the password is prompted, or read
@@ -136,6 +136,30 @@ Deleting a profile deactivates the account and hides it from profile CRUD withou
 deleting its Face ID material. Dashboard totals use the selected number of UTC
 calendar days through the current time; its daily series groups the original sessions
 so it works before any daily aggregate job runs. Reports use the same time window.
+
+### Surveys, conversation logs and daily reports
+
+The kiosk shows the one active survey at the end of a session (none active: the step is
+skipped). Staff create surveys under *Admin → Khảo sát* with 1–20 questions of type
+`rating` (1–5), `yes_no` (`Có`/`Không`) or `text` (≤1000 characters); a new survey starts
+inactive and activating one deactivates the others. Once a survey has responses its
+questions are frozen so stored answers keep their meaning; *Tạo phiên bản mới* copies it
+as the next `version`. Deleting is a soft delete that keeps responses. The kiosk endpoint
+validates every answer against its question type before writing any row.
+
+*Admin → Hội thoại* lists conversations in the selected window with visitor (when
+identified), kiosk, first question and how many AI answers were grounded. The
+*không có nguồn* filter shows conversations with an answer that cited no document — the
+list of knowledge gaps to fill. The detail view shows each answer's citations, model,
+status and latency.
+
+`report_service.aggregate_day` recomputes one UTC day of `daily_report_metrics` from the
+raw logs (sessions, identified sessions, questions, answered AI requests, survey responses,
+mean 1–5 rating, mean AI latency) and overwrites that day's row, so it is safe to repeat.
+`REPORT_JOB_ENABLED=true` runs it in-process every `REPORT_JOB_INTERVAL_MINUTES`
+(default 60) for today and yesterday; with several backend workers use
+`python scripts/aggregate_daily_reports.py --days 2` from cron instead. Staff can also
+press *Tổng hợp lại* on the reports page (`POST /reports/daily/rebuild?days=N`).
 
 For the complete backend unit suite, install `backend/requirements-test.txt` instead
 of only the runtime requirements. It adds NumPy and Pillow for test fixtures without

@@ -6,9 +6,10 @@ from app.api.deps import get_current_staff, login_binding, require_staff
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.responses import success_response
-from app.models.schema import AIRequest, KnowledgeDocument, FaceAuthenticationLog, InteractionEvent, SurveyResponse, UserSession
+from app.models.schema import AIRequest, AIResponse, KnowledgeDocument, FaceAuthenticationLog, InteractionEvent, SurveyResponse, UserSession
 from app.schemas.auth import AdminLoginRequest, AdminPasswordChange
 from app.services.admin_dashboard_service import daily_sessions, report_window
+from app.services.report_service import average_satisfaction, job_state
 from app.services.staff_auth_service import StaffIdentity, change_password, login, revoke_session
 
 login_router = APIRouter()
@@ -73,6 +74,10 @@ def live_dashboard(
         FaceAuthenticationLog.processing_time_ms.is_not(None),
         FaceAuthenticationLog.occurred_at.between(since, now),
     ))
+    satisfaction = average_satisfaction(db, since, now)
+    answered = db.scalar(select(func.count(AIResponse.id)).where(AIResponse.created_at.between(since, now))) or 0
+    grounded = db.scalar(select(func.count(AIResponse.id)).where(
+        AIResponse.created_at.between(since, now), AIResponse.grounded.is_(True))) or 0
     return success_response({
         "total_sessions": sessions,
         "identified_users": identified,
@@ -87,6 +92,9 @@ def live_dashboard(
             InteractionEvent.event_type.in_(("CAMERA_ERROR", "NETWORK_ERROR", "CAMERA_FAILED", "NETWORK_FAILED")),
             InteractionEvent.event_time.between(since, now),
         )) or 0,
+        "avg_satisfaction": float(satisfaction) if satisfaction is not None else None,
+        "grounded_answers": grounded,
+        "grounded_rate": round(grounded / answered * 100, 1) if answered else 0,
         "daily": daily_sessions(db, since, now),
     })
 
@@ -105,4 +113,12 @@ def status(db: Session = Depends(get_db)) -> dict:
          "warning": "Chế độ mock: câu trả lời được trích nguyên văn từ tài liệu, không dùng mô hình ngôn ngữ."
             if settings.ai_provider != "gemini" else None},
         {"module": "RAG", "status": f"{documents} tài liệu",
-         "warning": None if documents else "Chưa có tài liệu tri thức đang hoạt động; AI sẽ từ chối trả lời thông tin chính thức."}])
+         "warning": None if documents else "Chưa có tài liệu tri thức đang hoạt động; AI sẽ từ chối trả lời thông tin chính thức."},
+        {"module": "Voice", "status": settings.voice_provider,
+         "warning": "Nhận dạng giọng nói chạy trên trình duyệt kiosk; Electron có thể không hỗ trợ Web Speech."
+            if settings.voice_provider in {"mock", "browser"} else None},
+        {"module": "Báo cáo ngày", "status": "Tự động" if settings.report_job_enabled else "Thủ công",
+         "warning": (f"Lần chạy gần nhất lỗi: {job_state.last_error}" if job_state.last_error else
+                     f"Chạy gần nhất: {job_state.last_run_at:%Y-%m-%d %H:%M} UTC" if job_state.last_run_at else
+                     None if settings.report_job_enabled else
+                     "Bật REPORT_JOB_ENABLED hoặc chạy scripts/aggregate_daily_reports.py theo lịch.")}])

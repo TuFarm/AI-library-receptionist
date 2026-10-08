@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { MetricCard, PageHeader } from "../../components/ui";
-import { reportsApi, type ReportsOverview, type SessionReport } from "../../services/apiClient";
+import { reportsApi, type DailyMetric, type ReportsOverview, type SessionReport } from "../../services/apiClient";
 
 const PERIOD_OPTIONS = [7, 14, 30] as const;
 
@@ -11,6 +11,9 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
+  const [daily, setDaily] = useState<DailyMetric[]>([]);
+  const [rebuilding, setRebuilding] = useState(false);
+  const [dailyMessage, setDailyMessage] = useState("");
 
   useEffect(() => {
     let current = true;
@@ -18,11 +21,19 @@ export default function ReportsPage() {
     Promise.all([
       reportsApi.getOverview(days),
       reportsApi.getSessions(days),
-    ]).then(([o, s]) => { if (current) { setOverview(o); setSessions(s); } })
+      reportsApi.getDaily(days),
+    ]).then(([o, s, d]) => { if (current) { setOverview(o); setSessions(s); setDaily(d.metrics); } })
       .catch((reason: Error) => { if (current) setError(reason.message); })
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
   }, [days, retry]);
+
+  async function rebuild() {
+    setRebuilding(true); setDailyMessage("");
+    try { setDaily((await reportsApi.rebuildDaily(days)).metrics); setDailyMessage(`Đã tổng hợp lại ${days} ngày từ dữ liệu gốc.`); }
+    catch (reason) { setDailyMessage(reason instanceof Error ? reason.message : "Không thể tổng hợp báo cáo."); }
+    finally { setRebuilding(false); }
+  }
 
   if (error) return <><PageHeader title="Báo cáo tổng quan" description="Không thể tải dữ liệu báo cáo."/>
     <section className="panel empty-state"><strong>Đã xảy ra lỗi</strong><p role="alert">{error}</p><button onClick={() => setRetry(value => value + 1)}>Thử lại</button></section></>;
@@ -55,6 +66,19 @@ export default function ReportsPage() {
           )}</div>}
       </section>
     </div>
+
+    <section className="panel table-panel"><div className="panel-head"><h2>Số liệu theo ngày</h2>
+      <button className="secondary" disabled={rebuilding} onClick={() => void rebuild()}>{rebuilding ? "Đang tổng hợp…" : "Tổng hợp lại"}</button></div>
+      {dailyMessage && <p className="muted daily-message" role="status">{dailyMessage}</p>}
+      {daily.length === 0 ? <div className="empty-state"><p>Chưa có số liệu tổng hợp cho khoảng này. Bấm “Tổng hợp lại” hoặc bật job báo cáo tự động.</p></div>
+        : <div className="daily-table" role="table" aria-label="Số liệu theo ngày">
+          <div role="row" className="daily-head"><span>Ngày</span><span>Phiên</span><span>Đã nhận diện</span><span>Câu hỏi</span><span>Trả lời AI</span><span>Khảo sát</span><span>Hài lòng</span><span>Phản hồi AI</span></div>
+          {daily.map(m => <div role="row" key={m.date}><span>{new Date(`${m.date}T00:00:00`).toLocaleDateString("vi-VN")}</span><span>{m.total_sessions}</span><span>{m.identified_users}</span>
+            <span>{m.total_questions}</span><span>{m.total_ai_answers}</span><span>{m.total_surveys}</span>
+            <span>{m.avg_satisfaction_score != null ? `${m.avg_satisfaction_score.toLocaleString("vi-VN")}/5` : "—"}</span>
+            <span>{m.avg_ai_response_time_ms != null ? `${Math.round(m.avg_ai_response_time_ms)} ms` : "—"}</span></div>)}
+        </div>}
+    </section>
 
     <section className="panel reports-average-panel"><div className="panel-head"><h2>Thời gian phiên trung bình</h2></div>
       <div className="metric-grid compact">

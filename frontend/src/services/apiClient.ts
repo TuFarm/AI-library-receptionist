@@ -20,7 +20,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   try { body = await response.json() as ApiEnvelope<T>; } catch { /* invalid server response */ }
   if (!response.ok || !body?.success) {
     const fieldErrors: Record<string, string> = {};
-    const labels: Record<string, string> = { username: "Tên đăng nhập", password: "Mật khẩu", current_password: "Mật khẩu hiện tại", new_password: "Mật khẩu mới", full_name: "Họ và tên", student_code: "Mã sinh viên", email: "Email", phone: "Số điện thoại", faculty: "Khoa", major: "Ngành", admission_year: "Năm nhập học", title: "Tiêu đề", content: "Nội dung" };
+    const labels: Record<string, string> = { username: "Tên đăng nhập", password: "Mật khẩu", current_password: "Mật khẩu hiện tại", new_password: "Mật khẩu mới", full_name: "Họ và tên", student_code: "Mã sinh viên", email: "Email", phone: "Số điện thoại", faculty: "Khoa", major: "Ngành", admission_year: "Năm nhập học", title: "Tiêu đề", content: "Nội dung", survey_name: "Tên khảo sát", description: "Mô tả", question_text: "Nội dung câu hỏi", questions: "Danh sách câu hỏi" };
     if (response.status === 422 && Array.isArray(body?.error?.details)) {
       for (const detail of body.error.details as Array<{ loc?: string[]; type?: string }>) {
         const field = detail.loc?.at(-1);
@@ -171,6 +171,9 @@ export type AdminDashboard = {
   recognition_success_rate: number;
   avg_wait_seconds: number;
   camera_network_errors: number;
+  avg_satisfaction: number | null;
+  grounded_answers: number;
+  grounded_rate: number;
   daily: Array<{ date: string; sessions: number; identified: number }>;
 };
 
@@ -216,9 +219,86 @@ export type SessionReport = {
   avg_duration_seconds: number;
 };
 
+export type DailyMetric = {
+  date: string;
+  total_sessions: number;
+  identified_users: number;
+  total_questions: number;
+  total_ai_answers: number;
+  total_surveys: number;
+  avg_satisfaction_score: number | null;
+  avg_ai_response_time_ms: number | null;
+};
+
 export const reportsApi = {
   getOverview: (days = 7) => adminClient.get<ReportsOverview>(`/reports/overview?days=${days}`),
   getSessions: (days = 7) => adminClient.get<SessionReport>(`/reports/sessions?days=${days}`),
+  getDaily: (days = 7) => {
+    const end = new Date(); const start = new Date(end.getTime() - (days - 1) * 86_400_000);
+    const iso = (value: Date) => value.toISOString().slice(0, 10);
+    return adminClient.get<{ metrics: DailyMetric[] }>(`/reports/daily?start_date=${iso(start)}&end_date=${iso(end)}`);
+  },
+  rebuildDaily: (days = 7) => adminClient.post<{ metrics: DailyMetric[] }>(`/reports/daily/rebuild?days=${days}`, {}),
+};
+
+export type SurveyQuestionType = "rating" | "yes_no" | "text";
+export type AdminSurvey = {
+  id: string;
+  survey_name: string;
+  description: string | null;
+  version: number;
+  active: boolean;
+  response_count: number;
+  questions: Array<{ id: string; question_text: string; question_type: SurveyQuestionType; question_order: number }>;
+  created_at: string | null;
+};
+export type SurveyInput = { survey_name: string; description: string | null; questions: Array<{ question_text: string; question_type: SurveyQuestionType }> };
+export type SurveyResults = {
+  survey_id: string;
+  response_count: number;
+  questions: Array<{ id: string; text: string; type: SurveyQuestionType; answer_count: number; average?: number | null;
+    distribution?: Record<string, number>; recent_answers?: Array<{ text: string; submitted_at: string }> }>;
+};
+
+export const surveyAdminApi = {
+  list: () => adminClient.get<AdminSurvey[]>("/admin/surveys"),
+  create: (payload: SurveyInput) => adminClient.post<AdminSurvey>("/admin/surveys", payload),
+  update: (id: string, payload: Partial<SurveyInput>) => adminClient.patch<AdminSurvey>(`/admin/surveys/${id}`, payload),
+  setActive: (id: string, active: boolean) => adminClient.post<AdminSurvey>(`/admin/surveys/${id}/${active ? "activate" : "deactivate"}`, {}),
+  duplicate: (id: string) => adminClient.post<AdminSurvey>(`/admin/surveys/${id}/duplicate`, {}),
+  remove: (id: string) => adminClient.delete<{ id: string }>(`/admin/surveys/${id}`),
+  results: (id: string) => adminClient.get<SurveyResults>(`/admin/surveys/${id}/results`),
+};
+
+export type ConversationSummary = {
+  id: string;
+  started_at: string;
+  status: string;
+  device_code: string | null;
+  visitor: { full_name: string; student_code: string | null } | null;
+  identified: boolean;
+  message_count: number;
+  first_question: string | null;
+  answer_count: number;
+  grounded_count: number;
+};
+export type ConversationDetail = {
+  id: string;
+  started_at: string;
+  status: string;
+  visitor: ConversationSummary["visitor"];
+  messages: Array<{ id: string; sender_type: string; text: string; input_method: string | null; time: string;
+    ai?: { grounded: boolean; citations: Citation[]; model_name: string | null; status: string; latency_ms: number | null } }>;
+};
+
+export const conversationAdminApi = {
+  list: (filters: { days: number; search?: string; ungrounded?: boolean; offset?: number; limit?: number }) => {
+    const params = new URLSearchParams({ days: String(filters.days), offset: String(filters.offset ?? 0), limit: String(filters.limit ?? 20) });
+    if (filters.search?.trim()) params.set("search", filters.search.trim());
+    if (filters.ungrounded) params.set("ungrounded", "true");
+    return adminClient.get<{ items: ConversationSummary[]; total: number }>(`/admin/conversations?${params}`);
+  },
+  get: (id: string) => adminClient.get<ConversationDetail>(`/admin/conversations/${id}`),
 };
 
 export type KnowledgeDocument = {

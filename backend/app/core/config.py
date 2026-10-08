@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # Knowledge documents for RAG (PDF, DOCX, XLSX, TXT, MD, CSV) and how many chunks an answer may cite.
     max_knowledge_upload_mb: int = Field(default=20, ge=1, le=100)
     rag_top_k: int = Field(default=4, ge=1, le=10)
+    # In-process job that refreshes daily_report_metrics for today and yesterday.
+    report_job_enabled: bool = False
+    report_job_interval_minutes: int = Field(default=60, ge=5, le=1440)
 
     # Staff (admin UI) authentication. Accounts live in PostgreSQL; create the
     # first one with `python -m scripts.create_staff`.
