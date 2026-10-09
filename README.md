@@ -92,7 +92,8 @@ There are two kinds of caller, and every non-public endpoint requires one of the
 | `admin` | Everything a librarian can, plus staff accounts, kiosk devices and Face ID erasure (`DELETE /users/{id}/face-profile`). |
 
 Create the first admin from `backend` after migrating (the password is prompted, or read
-from `STAFF_PASSWORD` for non-interactive deploys such as a Railway shell):
+from `STAFF_PASSWORD` for non-interactive runs); in the Docker stack use
+`docker compose exec backend python scripts/create_staff.py ...`:
 
 ```powershell
 python scripts/create_staff.py --username admin --full-name "Quản trị viên" --role admin
@@ -271,9 +272,19 @@ same public URL. Follow logs with `docker compose logs -f backend frontend`; sto
 with `docker compose down`. Named volumes preserve PostgreSQL, Redis, and uploaded media.
 Use `docker compose down --volumes` only when intentionally deleting that data.
 
-For an internet-facing deployment, terminate HTTPS at a trusted reverse proxy/load balancer,
-set `KIOSK_STREAM_ORIGINS` to the exact public HTTPS origin(s), keep database/Redis ports
-private, and provide secrets through the deployment platform rather than committing `.env`.
+The target deployment is this stack on one server inside the library LAN; kiosks and staff
+open it from browsers on the same network (see *Backend server and kiosk LAN deployment*).
+`migrate` applies Alembic migrations on every `up`, so there is no separate migration step.
+Keep database/Redis ports private and keep the server's `.env` out of Git. Browsers grant
+camera/microphone only on HTTPS (or `localhost`), and this stack serves plain HTTP, so kiosks
+on other machines need TLS in front of it (for example a certificate from an internal CA on
+a reverse proxy) with `KIOSK_STREAM_ORIGINS` set to that exact `https://` origin.
+
+A Cloudflare quick tunnel is for testing only, never for real visitors: it exposes the
+machine to the internet and gives HTTPS for free. For the dev server run
+`cloudflared tunnel --url http://localhost:5173` and put the printed host in
+`DEV_ALLOWED_HOSTS` (`frontend/.env`); for the Docker stack tunnel `http://localhost:${APP_PORT}`
+and add the tunnel's `https://` origin to `KIOSK_STREAM_ORIGINS`. Stop the tunnel after testing.
 
 To validate configuration without starting containers:
 

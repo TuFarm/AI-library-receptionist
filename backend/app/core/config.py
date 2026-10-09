@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def select_psycopg_driver(cls, value: object) -> object:
-        """Make standard Railway/Heroku Postgres URLs use installed psycopg 3."""
+        """Make plain postgres:// / postgresql:// URLs use the installed psycopg 3 driver."""
         if not isinstance(value, str):
             return value
         if value.startswith("postgres://"):

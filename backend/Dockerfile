@@ -16,11 +16,12 @@ RUN if [ "$INSTALL_FACE_OPENCV" = "true" ]; then pip install --no-cache-dir -r r
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
+COPY scripts ./scripts
 
 RUN mkdir -p /app/storage/media && chown -R app:app /app
 USER app
 
 EXPOSE 8000
-# Railway injects PORT at runtime. The fallback keeps local Docker behavior
-# unchanged when PORT is not set.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --proxy-headers --forwarded-allow-ips='*'"]
+# Only the Nginx frontend container reaches this port (private Compose network), so its
+# forwarded headers are trusted.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips=*"]

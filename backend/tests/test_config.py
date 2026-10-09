@@ -1,14 +1,14 @@
 from app.core.config import Settings
 
 
-def test_railway_postgres_url_uses_installed_psycopg_driver():
+def test_plain_postgres_url_uses_installed_psycopg_driver():
     settings = Settings(
         _env_file=None,
-        database_url="postgresql://user:password@postgres.railway.internal:5432/railway",
+        database_url="postgresql://user:password@db.lan:5432/ai_library",
     )
 
     assert settings.database_url == (
-        "postgresql+psycopg://user:password@postgres.railway.internal:5432/railway"
+        "postgresql+psycopg://user:password@db.lan:5432/ai_library"
     )
 
 
