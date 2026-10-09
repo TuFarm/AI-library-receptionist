@@ -47,6 +47,16 @@ jobs:
           alembic upgrade head
           alembic downgrade base
           alembic upgrade head
+      - name: Face ID erasure audit accepts every source after migrations
+        run: |
+          python -c "
+          import sqlalchemy as sa
+          from app.core.config import settings
+          with sa.create_engine(settings.database_url).connect() as conn:
+              defs = conn.execute(sa.text(\"SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'face_id_erasures'::regclass AND contype = 'c'\")).scalars().all()
+          assert len(defs) == 1 and all(s in defs[0] for s in ('KIOSK', 'ADMIN', 'USER_DELETED')), defs
+          print(defs[0])
+          "
       - name: App starts against the migrated database
         run: |
           uvicorn app.main:app --port 8000 &
