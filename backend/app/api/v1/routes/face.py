@@ -149,7 +149,7 @@ async def enroll(
                 FaceProfile.user_id == claimed.id, FaceProfile.active.is_(True), FaceProfile.deleted_at.is_(None),
             )):
                 raise AppError(409, "FACE_ALREADY_REGISTERED",
-                               "Mã sinh viên hoặc email này đã có Face ID. Vui lòng liên hệ quầy thủ thư.")
+                               "Mã sinh viên hoặc email này đã có Face ID. Nếu kiosk không còn nhận ra bạn, hãy mang thẻ sinh viên đến quầy thư viện để quản trị viên xóa Face ID cũ, sau đó đăng ký lại.")
             user = claimed
         if user is None:
             if not full_name or not full_name.strip():

@@ -99,6 +99,22 @@ class FaceProfile(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     user: Mapped[User] = relationship(back_populates="face_profiles")
 
 
+class FaceIdErasure(UUIDPrimaryKeyMixin, Base):
+    """Audit trail of every Face ID erasure: by the visitor at a kiosk, or by an admin at the desk."""
+    __tablename__ = "face_id_erasures"
+    __table_args__ = (CheckConstraint("source IN ('KIOSK', 'ADMIN')"),)
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(String(10))
+    # Snapshot of the admin's username, kept even if the staff account is later removed.
+    staff_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("staff_accounts.id", ondelete="SET NULL"))
+    staff_username: Mapped[str | None] = mapped_column(String(100))
+    device_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("devices.id", ondelete="SET NULL"))
+    reason: Mapped[str | None] = mapped_column(String(500))
+    deleted_profiles: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class FaceEnrollmentRequest(UUIDPrimaryKeyMixin, Base):
     """Idempotency record for POST /face/enroll: a retried request replays the first result."""
     __tablename__ = "face_enrollment_requests"

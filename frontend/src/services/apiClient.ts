@@ -211,7 +211,10 @@ export type AdminUser = {
   student_year: number | null;
   user_type: string;
   account_status: string;
+  /** Present in list results only. */
+  has_face_id?: boolean;
 };
+export type FaceIdErasure = { id: string; source: "KIOSK" | "ADMIN"; staff_username: string | null; reason: string | null; deleted_profiles: number; created_at: string };
 
 export const adminUserApi = {
   list: (search = "", offset = 0, limit = 20) => adminClient.get<{ items: AdminUser[]; total: number }>(`/users?offset=${offset}&limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ""}`),
@@ -219,6 +222,9 @@ export const adminUserApi = {
   update: (id: string, payload: Partial<Pick<AdminUser, "student_code" | "full_name" | "email" | "faculty" | "major" | "admission_year">>) => adminClient.patch<AdminUser>(`/users/${id}`, payload),
   get: (id: string) => adminClient.get<AdminUser>(`/users/${id}`),
   delete: (id: string) => adminClient.delete<{ user_id: string; account_status: string }>(`/users/${id}`),
+  /** Admin only, with the student present at the desk; every erasure is logged. */
+  eraseFaceId: (id: string, reason: string) => adminClient.post<{ user_id: string; deleted_profiles: number }>(`/users/${id}/face-id-erasures`, { reason, student_present: true }),
+  faceIdErasures: (id: string) => adminClient.get<FaceIdErasure[]>(`/users/${id}/face-id-erasures`),
 };
 
 export type ReportsOverview = {

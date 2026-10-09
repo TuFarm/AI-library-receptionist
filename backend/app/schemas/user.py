@@ -69,3 +69,18 @@ class UserCreate(BaseModel):
             raise ValueError("Mã sinh viên không hợp lệ")
         return value
 
+
+
+class FaceIdErasureCreate(BaseModel):
+    """Admin erasure at the library desk; the student must be there in person."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    reason: str = Field(min_length=5, max_length=500)
+    student_present: bool
+
+    @field_validator("student_present")
+    @classmethod
+    def must_be_present(cls, value: bool) -> bool:
+        if value is not True:
+            raise ValueError("Chỉ xóa Face ID khi sinh viên có mặt và đã xác minh danh tính tại quầy")
+        return value

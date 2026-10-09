@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
-from app.models.schema import FaceProfile, User
+from app.models.schema import FaceIdErasure, FaceProfile, User
 
 
 def calculate_student_year(
@@ -48,7 +48,10 @@ def apply_profile_update(db: Session, user: User, values: dict) -> User:
     return user
 
 
-def delete_face_profiles(db: Session, user_id: UUID) -> int:
+def delete_face_profiles(db: Session, user_id: UUID, *, source: str, staff_id: UUID | None = None,
+                         staff_username: str | None = None, device_id: UUID | None = None,
+                         reason: str | None = None) -> int:
+    """Erase all of a user's Face ID material and record who did it (source KIOSK or ADMIN)."""
     # Every profile, including inactive or rollback ones: erasure must remove all biometric material.
     profiles = db.scalars(select(FaceProfile).where(FaceProfile.user_id == user_id)).all()
     for profile in profiles:
@@ -56,5 +59,7 @@ def delete_face_profiles(db: Session, user_id: UUID) -> int:
     user = db.get(User, user_id)
     if user is not None:
         user.face_consent_at = user.face_consent_version = None
+    db.add(FaceIdErasure(user_id=user_id, source=source, staff_id=staff_id, staff_username=staff_username,
+        device_id=device_id, reason=reason, deleted_profiles=len(profiles), created_at=datetime.now(UTC)))
     db.commit()
     return len(profiles)

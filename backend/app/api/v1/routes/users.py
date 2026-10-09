@@ -3,21 +3,29 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
-from app.api.deps import require_staff
+from app.api.deps import require_admin, require_staff
 from app.core.database import get_db
 from app.core.errors import AppError
-from app.models.schema import User
+from app.models.schema import FaceIdErasure, FaceProfile, User
 from app.core.responses import success_response
-from app.schemas.user import UserCreate, UserProfileUpdate
+from app.services.staff_auth_service import StaffIdentity
+from app.schemas.user import FaceIdErasureCreate, UserCreate, UserProfileUpdate
 from app.services.user_service import (
-    apply_profile_update, calculate_student_year, commit_profile,
+    apply_profile_update, calculate_student_year, commit_profile, delete_face_profiles,
 )
 
 router = APIRouter()
 
 
-def _admin_user_data(user: User) -> dict:
-    return {
+def _users_with_face_id(db: Session, user_ids: list[UUID]) -> set[UUID]:
+    if not user_ids:
+        return set()
+    return set(db.scalars(select(FaceProfile.user_id).where(
+        FaceProfile.user_id.in_(user_ids), FaceProfile.active.is_(True), FaceProfile.deleted_at.is_(None))))
+
+
+def _admin_user_data(user: User, has_face_id: bool | None = None) -> dict:
+    data = {
         "id": str(user.id),
         "student_code": user.student_code,
         "full_name": user.full_name,
@@ -29,6 +37,10 @@ def _admin_user_data(user: User) -> dict:
         "user_type": user.user_type,
         "account_status": user.account_status,
     }
+    if has_face_id is not None:
+        # List view only: whether a Face ID exists. Staff never see the template itself.
+        data["has_face_id"] = has_face_id
+    return data
 
 
 @router.get("", dependencies=[Depends(require_staff)])
@@ -47,7 +59,8 @@ def list_users(
     users = db.scalars(
         select(User).where(*filters).order_by(User.created_at.desc(), User.id).offset(offset).limit(limit)
     ).all()
-    return success_response({"items": [_admin_user_data(user) for user in users], "total": total, "offset": offset, "limit": limit})
+    enrolled = _users_with_face_id(db, [user.id for user in users])
+    return success_response({"items": [_admin_user_data(user, user.id in enrolled) for user in users], "total": total, "offset": offset, "limit": limit})
 
 
 @router.post("", status_code=201, dependencies=[Depends(require_staff)])
@@ -98,3 +111,26 @@ def update_user(user_id: UUID, payload: UserProfileUpdate, db: Session = Depends
         raise AppError(404, "USER_NOT_FOUND", "Không tìm thấy người dùng.")
     apply_profile_update(db, user, payload.model_dump(exclude_unset=True))
     return success_response(_admin_user_data(user), "Cập nhật thông tin thành công.")
+
+
+@router.post("/{user_id}/face-id-erasures")
+def erase_face_id(user_id: UUID, payload: FaceIdErasureCreate,
+                  staff: StaffIdentity = Depends(require_admin), db: Session = Depends(get_db)) -> dict:
+    """Admin erasure for a student at the desk (e.g. the kiosk no longer recognizes them)."""
+    user = db.get(User, user_id)
+    if user is None or user.deleted_at is not None:
+        raise AppError(404, "USER_NOT_FOUND", "Không tìm thấy người dùng.")
+    if not _users_with_face_id(db, [user_id]):
+        raise AppError(409, "NO_FACE_ID", "Người dùng này chưa có Face ID.")
+    deleted = delete_face_profiles(db, user_id, source="ADMIN", staff_id=staff.id,
+                                   staff_username=staff.username, reason=payload.reason)
+    return success_response({"user_id": str(user_id), "deleted_profiles": deleted}, "Đã xóa Face ID.")
+
+
+@router.get("/{user_id}/face-id-erasures", dependencies=[Depends(require_admin)])
+def list_face_id_erasures(user_id: UUID, db: Session = Depends(get_db)) -> dict:
+    rows = db.scalars(select(FaceIdErasure).where(FaceIdErasure.user_id == user_id)
+                      .order_by(FaceIdErasure.created_at.desc()).limit(50)).all()
+    return success_response([{"id": str(row.id), "source": row.source, "staff_username": row.staff_username,
+        "reason": row.reason, "deleted_profiles": row.deleted_profiles,
+        "created_at": row.created_at.isoformat()} for row in rows])

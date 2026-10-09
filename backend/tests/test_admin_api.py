@@ -61,7 +61,7 @@ def client(database):
 PROTECTED = [
     ("GET", USER_URL), ("POST", USER_URL),
     ("GET", f"{USER_URL}/{MISSING}"), ("PATCH", f"{USER_URL}/{MISSING}"),
-    ("DELETE", f"{USER_URL}/{MISSING}"),
+    ("DELETE", f"{USER_URL}/{MISSING}"), ("POST", f"{USER_URL}/{MISSING}/face-id-erasures"),
     ("POST", "/api/v1/departments"), ("PATCH", f"/api/v1/departments/{MISSING}"),
     ("POST", f"/api/v1/departments/{MISSING}/majors"), ("PATCH", f"/api/v1/departments/majors/{MISSING}"),
     ("GET", "/api/v1/admin/staff"), ("POST", "/api/v1/admin/staff"), ("GET", "/api/v1/admin/devices"),
@@ -111,17 +111,13 @@ def test_unknown_bearer_token_is_rejected(database, method, path):
 
 
 ADMIN_ONLY = [
+    ("POST", f"{USER_URL}/{MISSING}/face-id-erasures"), ("GET", f"{USER_URL}/{MISSING}/face-id-erasures"),
     ("GET", "/api/v1/admin/staff"),
     ("POST", "/api/v1/admin/staff"), ("GET", "/api/v1/admin/devices"), ("POST", "/api/v1/admin/devices"),
 ]
 
 
-def test_no_staff_role_can_erase_a_face_id(admin_staff):
-    """Only the visitor, identified at a kiosk, erases their Face ID (consent text 2026-10b)."""
-    assert TestClient(app).delete(f"{USER_URL}/{MISSING}/face-profile").status_code in (404, 405)
-
-
-def test_librarian_reads_dashboards_but_cannot_manage_access(database):
+def test_librarian_reads_dashboards_but_cannot_manage_access_or_biometrics(database):
     previous = app.dependency_overrides.copy()
     app.dependency_overrides[get_db] = lambda: database
     try:

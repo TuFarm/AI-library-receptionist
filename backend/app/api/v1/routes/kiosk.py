@@ -83,7 +83,7 @@ def delete_session_face_profile(session_id: UUID, device: Device = Depends(requi
                                 db: Session = Depends(get_db)) -> dict:
     session = owned_session(db, session_id, device, active=True)
     user = _identified_user(db, session)
-    deleted = delete_face_profiles(db, user.id)
+    deleted = delete_face_profiles(db, user.id, source="KIOSK", device_id=device.id)
     record_event(db, event_type="FACE_PROFILE_DELETED", session_id=session.id, user_id=user.id, device_id=device.id)
     db.commit()
     return success_response({"user_id": str(user.id), "deleted_profiles": deleted}, "Đã xóa Face ID.")

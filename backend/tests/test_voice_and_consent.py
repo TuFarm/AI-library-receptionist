@@ -76,6 +76,6 @@ def test_erasing_face_id_also_clears_the_consent_record(sqlite_db):
     sqlite_db.add(FaceProfile(user_id=user.id, enrolled_at=datetime.now(UTC), active=True,
                               model_name="m", model_version="1", face_template_ref="ref"))
     sqlite_db.commit()
-    assert delete_face_profiles(sqlite_db, user.id) == 1
+    assert delete_face_profiles(sqlite_db, user.id, source="KIOSK") == 1
     sqlite_db.refresh(user)
     assert user.face_consent_at is None and user.face_consent_version is None

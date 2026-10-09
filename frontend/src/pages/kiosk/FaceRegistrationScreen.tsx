@@ -8,11 +8,11 @@ const newUserProgress = ["Thông tin", "Đồng ý", "Nhận diện khuôn mặt
 const reenrollmentProgress = ["Đồng ý", "Nhận diện khuôn mặt", "Xử lý", "Hoàn tất"];
 
 /** Must match the backend FACE_CONSENT_VERSION; bump both whenever this text changes. */
-export const FACE_CONSENT_VERSION = "2026-10b";
+export const FACE_CONSENT_VERSION = "2026-10c";
 export const FACE_CONSENT_POINTS = [
   "Thư viện chỉ lưu một mẫu số hóa của khuôn mặt (không lưu ảnh chụp), được mã hóa trên máy chủ thư viện, để nhận ra bạn ở các lần sau.",
   "Mẫu khuôn mặt chỉ dùng để chào và cá nhân hóa trợ lý tại kiosk, không dùng cho mục đích khác.",
-  "Chỉ chính bạn mới xóa được Face ID của mình: sau khi kiosk nhận ra bạn, chọn \"Xóa Face ID\" trong mục hồ sơ, bất cứ lúc nào.",
+  "Bạn có thể xóa Face ID bất cứ lúc nào: tự xóa trong mục hồ sơ sau khi kiosk nhận ra bạn, hoặc mang thẻ sinh viên đến quầy thư viện để quản trị viên xóa giúp. Mỗi lần xóa đều được ghi lại.",
   "Không đồng ý thì bạn vẫn dùng trợ lý bình thường với tư cách khách.",
 ];
 

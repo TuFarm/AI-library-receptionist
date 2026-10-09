@@ -9,7 +9,7 @@ from app.services.user_service import calculate_student_year
 
 
 EXPECTED_TABLES = {
-    "users", "user_preferences", "face_profiles", "face_enrollment_requests", "face_authentication_logs",
+    "users", "user_preferences", "face_profiles", "face_enrollment_requests", "face_id_erasures", "face_authentication_logs",
     "devices", "user_sessions", "interaction_events", "knowledge_sources",
     "knowledge_documents", "knowledge_chunks", "conversations",
     "conversation_messages", "ai_requests", "ai_responses", "ai_feedback",

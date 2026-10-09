@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { PageHeader } from "../../components/ui";
-import { adminUserApi, ApiClientError, type AdminUser } from "../../services/apiClient";
+import { getAdminSession } from "../../services/adminAccess";
+import { adminUserApi, ApiClientError, type AdminUser, type FaceIdErasure } from "../../services/apiClient";
 
 const emptyForm = { student_code: "", full_name: "", email: "", faculty: "", major: "", admission_year: "" };
 type UserForm = typeof emptyForm;
@@ -41,7 +42,41 @@ const FIELD_LABELS: Record<string, string> = {
   faculty: "Khoa", major: "Ngành", admission_year: "Năm nhập học",
 };
 
+/** The admin must give a reason and confirm the student is at the desk (mirrors the backend rule). */
+export function canEraseFaceId(reason: string, studentPresent: boolean): boolean {
+  return studentPresent && reason.trim().length >= 5 && reason.trim().length <= 500;
+}
+
+function FaceIdEraseDialog({ user, onClose, onErased }: { user: AdminUser; onClose: () => void; onErased: () => void }) {
+  const [reason, setReason] = useState("");
+  const [present, setPresent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [history, setHistory] = useState<FaceIdErasure[] | null>(null);
+  useEffect(() => { void adminUserApi.faceIdErasures(user.id).then(setHistory).catch(() => setHistory([])); }, [user.id]);
+  async function erase() {
+    if (busy || !canEraseFaceId(reason, present)) return;
+    setBusy(true); setError("");
+    try { await adminUserApi.eraseFaceId(user.id, reason.trim()); onErased(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Không thể xóa Face ID."); setBusy(false); }
+  }
+  return <div className="modal-overlay" onClick={() => { if (!busy) onClose(); }}><div className="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="face-erase-title" onClick={e => e.stopPropagation()}>
+    <h3 id="face-erase-title">Xóa Face ID của {user.full_name}</h3>
+    <p>Chỉ dùng khi sinh viên đến quầy yêu cầu (ví dụ kiosk không còn nhận ra họ). Thao tác này xóa vĩnh viễn mẫu khuôn mặt và được ghi lại kèm tên tài khoản của bạn.</p>
+    <label className="field">Lý do<textarea maxLength={500} value={reason} disabled={busy} onChange={e => setReason(e.target.value)} placeholder="VD: Kiosk không còn nhận ra, SV mang thẻ đến quầy"/></label>
+    <label className="checkbox-row"><input type="checkbox" checked={present} disabled={busy} onChange={e => setPresent(e.target.checked)}/> Sinh viên có mặt tại quầy và tôi đã kiểm tra thẻ sinh viên</label>
+    {history && history.length > 0 && <div className="face-erase-history"><strong>Lịch sử xóa</strong><ul>{history.map(row => <li key={row.id}>
+      {new Date(row.created_at).toLocaleString("vi-VN")} · {row.source === "ADMIN" ? `quản trị viên ${row.staff_username ?? "?"}` : "sinh viên tự xóa tại kiosk"}{row.reason ? ` · ${row.reason}` : ""}</li>)}</ul></div>}
+    {error && <p role="alert">{error}</p>}
+    <div className="modal-actions">
+      <button disabled={busy} className="secondary" onClick={onClose}>Hủy</button>
+      <button disabled={busy || !canEraseFaceId(reason, present)} className="danger" onClick={() => void erase()}>{busy ? "Đang xóa…" : "Xóa Face ID"}</button>
+    </div>
+  </div></div>;
+}
+
 export default function UserManagementPage() {
+  const isAdmin = getAdminSession()?.role !== "librarian";
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
@@ -58,6 +93,7 @@ export default function UserManagementPage() {
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [erasingFaceId, setErasingFaceId] = useState<AdminUser | null>(null);
   const busy = saving || deleting;
   const messageTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(messageTimer.current), []);
@@ -165,6 +201,7 @@ export default function UserManagementPage() {
         <span className={`badge ${user.account_status === "active" ? "success" : "danger"}`}>{user.account_status === "active" ? "Hoạt động" : user.account_status}</span>
         <div className="row-actions">
           <button type="button" disabled={busy} className="secondary user-edit-button" onClick={() => startEdit(user)}>Sửa</button>
+          {isAdmin && user.has_face_id && <button type="button" disabled={busy} className="secondary danger-text" onClick={() => setErasingFaceId(user)}>Xóa Face ID</button>}
           <button type="button" disabled={busy} className="secondary danger-text" onClick={() => setConfirmDelete(user.id)}>Xóa</button>
         </div>
       </div>)}</div>}
@@ -174,6 +211,8 @@ export default function UserManagementPage() {
         <button disabled={loading || busy || (page + 1) * pageSize >= total} onClick={() => setPage(value => value + 1)}>Trang sau</button>
       </nav>}
     </section>
+    {erasingFaceId && <FaceIdEraseDialog user={erasingFaceId} onClose={() => setErasingFaceId(null)}
+      onErased={() => { setErasingFaceId(null); showMessage("Đã xóa Face ID. Sinh viên có thể đăng ký lại tại kiosk."); load(search, page); }}/>}
     {/* Confirm delete dialog */}
     {confirmDelete && <div className="modal-overlay" onClick={() => { if (!deleting) setConfirmDelete(null); }}><div className="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title" onClick={e => e.stopPropagation()}>
       <h3 id="delete-title">Xác nhận xóa</h3>

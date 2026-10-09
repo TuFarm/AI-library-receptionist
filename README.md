@@ -89,9 +89,9 @@ There are two kinds of caller, and every non-public endpoint requires one of the
 | Role | Can do |
 | --- | --- |
 | `librarian` | Dashboard, reports, knowledge documents, conversation logs, surveys, non-biometric user profile CRUD, departments/majors. |
-| `admin` | Everything a librarian can, plus staff accounts and kiosk devices. |
+| `admin` | Everything a librarian can, plus staff accounts, kiosk devices, and Face ID erasure at the desk (`POST /users/{id}/face-id-erasures`). |
 
-No staff role can read, export or erase a Face ID: only the visitor, once identified at a kiosk, erases their own (see *Consent*).
+No staff role can read or export a Face ID template; the admin user list only shows whether one exists (`has_face_id`). See *Consent* for erasure.
 
 Create the first admin from `backend` after migrating (the password is prompted, or read
 from `STAFF_PASSWORD` for non-interactive runs); in the Docker stack use
@@ -127,7 +127,9 @@ deletion from the kiosk go through `PATCH /kiosk/sessions/{id}/profile` and
 `DELETE /kiosk/sessions/{id}/face-profile`, which act only on the visitor already identified
 in that live session. `POST /face/enroll` accepts `user_id` only for that same identified
 visitor, and refuses (409 `FACE_ALREADY_REGISTERED`) to attach a new face to a student code
-or email whose account already has a Face ID — the owner must be recognized first. `GET /kiosk/device` lets a kiosk check its key.
+or email whose account already has a Face ID — the owner must be recognized first, or, if the
+kiosk no longer recognizes them, bring their student card to the desk so an admin erases the
+old Face ID before they re-enroll. `GET /kiosk/device` lets a kiosk check its key.
 
 Public without credentials: health checks, active survey and book suggestion lookups,
 and department/major lookups. The old `/…/mock` demo routes and static demo pages have been removed;
@@ -203,7 +205,7 @@ Never store raw face photos in user data. `face_profiles` holds a template/refer
 
 **Template encryption.** `face_template_encrypted` is encrypted by the application with AES-256-GCM (`app/core/template_crypto.py`) under `FACE_TEMPLATE_KEY`, base64 of 32 random bytes (`python -c "import base64,os;print(base64.b64encode(os.urandom(32)).decode())"`). Each row carries a key id and a fresh nonce and is bound to its owner's user id, so a template copied to another user, a wrong key, or a tampered row is skipped (logged by profile id only) instead of matched. `ENVIRONMENT=production` refuses to start without the key and ignores unencrypted rows; development without a key still stores the legacy plaintext format. Encrypt rows written before the key existed with `python scripts/encrypt_face_templates.py --dry-run`, then without `--dry-run` (safe to repeat; in Docker prefix `docker compose exec backend`). **Losing the key makes every Face ID unusable** and everyone must re-enroll: keep a copy outside the server and outside database backups, which would otherwise hold both halves. There is no key rotation yet; changing the key means re-enrollment. Still open: liveness/anti-spoofing, audit, a retention policy, and demographic performance validation.
 
-**Consent.** Before the camera step of any enrollment (new or re-enrollment) the kiosk shows what is stored, why, and how to erase it, and requires an explicit tick. `POST /face/enroll` rejects a request without `face_consent=true` (422 `FACE_CONSENT_REQUIRED`) before the image is saved or analysed, and on success records `users.face_consent_at` and `users.face_consent_version` (`FACE_CONSENT_VERSION`, which must match `FACE_CONSENT_VERSION` in `FaceRegistrationScreen.tsx`; bump both when the text changes). The current text (`2026-10b`) says templates are encrypted and that only the visitor can erase their Face ID, from the kiosk profile after being recognized (`DELETE /kiosk/sessions/{id}/face-profile`); there is no staff erasure route. Erasing removes every profile row of that user and clears the consent record. A librarian's profile deletion deactivates the account and stops recognition but leaves the encrypted template in place.
+**Consent.** Before the camera step of any enrollment (new or re-enrollment) the kiosk shows what is stored, why, and how to erase it, and requires an explicit tick. `POST /face/enroll` rejects a request without `face_consent=true` (422 `FACE_CONSENT_REQUIRED`) before the image is saved or analysed, and on success records `users.face_consent_at` and `users.face_consent_version` (`FACE_CONSENT_VERSION`, which must match `FACE_CONSENT_VERSION` in `FaceRegistrationScreen.tsx`; bump both when the text changes). The current text (`2026-10c`) says templates are encrypted and offers two ways to erase a Face ID: the visitor from the kiosk profile after being recognized (`DELETE /kiosk/sessions/{id}/face-profile`), or an admin at the desk when the student is present, for example because the kiosk no longer recognizes them (`POST /users/{id}/face-id-erasures` with a reason and `student_present=true`; librarians get 403). Erasing removes every profile row of that user, clears the consent record, and writes an audit row to `face_id_erasures` (source `KIOSK` with the device, or `ADMIN` with the admin's username and reason); admins see that history in the erase dialog (`GET /users/{id}/face-id-erasures`). A librarian's profile deletion deactivates the account and stops recognition but leaves the encrypted template in place.
 
 **Liveness is not implemented.** Nothing distinguishes a live face from a printed photo or a screen. This is a deliberate, documented gap: a heuristic (blink or head-turn checks) would give a false sense of security. Real anti-spoofing needs a dedicated, calibrated presentation-attack-detection model validated on consented data. Until then, treat Face ID as a convenience greeting, never as authentication for anything sensitive. Concretely, today a photo of an enrolled student yields an identified kiosk session that shows that student's profile (email masked), can edit it, can erase their Face ID, and can re-enroll, replacing their template with the presenter's face. The admin status page states this gap whenever a real Face ID provider is configured.
 

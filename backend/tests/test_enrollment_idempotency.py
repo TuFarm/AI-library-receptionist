@@ -76,7 +76,7 @@ def test_the_same_key_from_another_kiosk_is_rejected(analysed, use_db):
 def test_an_erased_face_id_is_never_replayed_as_success(analysed, use_db):
     key = uuid4()
     user_id = UUID(enroll(key).json()["data"]["user_id"])
-    delete_face_profiles(use_db, user_id)
+    delete_face_profiles(use_db, user_id, source="KIOSK")
     response = enroll(key)
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "ENROLLMENT_ALREADY_PROCESSED"

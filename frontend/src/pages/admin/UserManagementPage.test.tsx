@@ -25,3 +25,13 @@ describe("staff profile form validation", () => {
     expect(errors).toHaveProperty("email");
   });
 });
+
+describe("admin Face ID erasure form", () => {
+  it("needs a reason and the student at the desk", async () => {
+    const { canEraseFaceId } = await import("./UserManagementPage");
+    expect(canEraseFaceId("SV mang thẻ đến quầy", true)).toBe(true);
+    expect(canEraseFaceId("SV mang thẻ đến quầy", false)).toBe(false);
+    expect(canEraseFaceId("  ab  ", true)).toBe(false);
+    expect(canEraseFaceId("x".repeat(501), true)).toBe(false);
+  });
+});
