@@ -35,7 +35,10 @@ export class CameraManager {
     }
     const generation = this.generation;
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user", width: { ideal: CAMERA_WIDTH, min: 1280 }, height: { ideal: CAMERA_HEIGHT, min: 720 }, frameRate: { ideal: 30, max: 30 } },
+      // Prefer an HD stream when the device supports it, but do not reject
+      // lower-resolution kiosk cameras. `min` made otherwise valid cameras
+      // fail with OverconstrainedError before a preview could be attached.
+      video: { facingMode: "user", width: { ideal: CAMERA_WIDTH }, height: { ideal: CAMERA_HEIGHT }, frameRate: { ideal: 30, max: 30 } },
       audio: false,
     });
     if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return false; }

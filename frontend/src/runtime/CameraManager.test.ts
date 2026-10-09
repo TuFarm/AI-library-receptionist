@@ -19,6 +19,15 @@ describe("persistent kiosk camera lifecycle", () => {
     expect(manager.sensingVideo).toBe(manager.sensingVideo);
     expect(await manager.start()).toBe(true); expect(await manager.start()).toBe(true);
     expect(getUserMedia).toHaveBeenCalledTimes(1); expect(stop).not.toHaveBeenCalled();
+    expect(getUserMedia).toHaveBeenCalledWith({
+      video: {
+        facingMode: "user",
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        frameRate: { ideal: 30, max: 30 },
+      },
+      audio: false,
+    });
     manager.stop(); expect(stop).toHaveBeenCalledTimes(1);
     expect(videos[0].srcObject).toBe(null);
   });
