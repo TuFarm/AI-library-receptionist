@@ -95,3 +95,22 @@ def test_status_page_discloses_liveness_gap_and_where_voice_goes(
     rows = {row["module"]: row for row in TestClient(app).get("/api/v1/admin/status").json()["data"]}
     assert face_warning in rows["FaceID"]["warning"]
     assert voice_warning in rows["Voice"]["warning"]
+
+
+def test_a_concurrent_duplicate_that_loses_the_race_replays_the_winner(analysed, use_db, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    from app.api.v1.routes import face
+    key = uuid4()
+    first = enroll(key).json()["data"]
+    # Simulate the race: the duplicate passes the replay check before the winner commits,
+    # then hits the unique index while flushing its own rows.
+    real_replay = face._replay_enrollment
+    calls = []
+    monkeypatch.setattr(face, "_replay_enrollment",
+                        lambda *args: calls.append(1) or (None if len(calls) == 1 else real_replay(*args)))
+    monkeypatch.setattr(face, "record_event", lambda *_a, **_k: (_ for _ in ()).throw(IntegrityError("insert", {}, Exception("dup"))))
+    response = enroll(key)
+    assert response.status_code == 200
+    assert response.json()["data"]["face_profile_id"] == first["face_profile_id"]
+    assert count(use_db, FaceProfile) == 1

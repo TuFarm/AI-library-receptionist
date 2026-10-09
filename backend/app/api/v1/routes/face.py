@@ -193,15 +193,7 @@ async def enroll(
                 FaceEnrollmentRequest.created_at < datetime.now(UTC) - ENROLLMENT_REPLAY_WINDOW))
             db.add(FaceEnrollmentRequest(request_key=enrollment_id, device_id=device.id, user_id=user.id,
                 face_profile_id=profile.id, created_at=datetime.now(UTC)))
-        try:
-            db.commit()
-        except IntegrityError:
-            # A concurrent duplicate committed first: answer with its result instead.
-            db.rollback()
-            replay = _replay_enrollment(db, device, enrollment_id) if enrollment_id is not None else None
-            if replay is None:
-                raise
-            return replay
+        db.commit()
         db.refresh(profile)
         return _enrolled_response(user, profile, result.quality_score)
     except MediaValidationError as exc:
@@ -219,6 +211,14 @@ async def enroll(
     except FaceProviderUnavailable as exc:
         db.rollback()
         raise AppError(503, "FACE_PROVIDER_UNAVAILABLE", str(exc)) from exc
+    except IntegrityError:
+        # A concurrent duplicate of this request (e.g. a retry after a client timeout) won the
+        # race at flush or commit: answer with its result instead of an error.
+        db.rollback()
+        replay = _replay_enrollment(db, device, enrollment_id) if enrollment_id is not None else None
+        if replay is None:
+            raise
+        return replay
     except Exception:
         db.rollback()
         raise
