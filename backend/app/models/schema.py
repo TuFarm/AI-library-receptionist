@@ -100,9 +100,10 @@ class FaceProfile(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
 
 
 class FaceIdErasure(UUIDPrimaryKeyMixin, Base):
-    """Audit trail of every Face ID erasure: by the visitor at a kiosk, or by an admin at the desk."""
+    """Audit trail of every Face ID erasure: the visitor at a kiosk, an admin at the desk, or a
+    staff member deleting the whole profile (USER_DELETED)."""
     __tablename__ = "face_id_erasures"
-    __table_args__ = (CheckConstraint("source IN ('KIOSK', 'ADMIN')"),)
+    __table_args__ = (CheckConstraint("source IN ('KIOSK', 'ADMIN', 'USER_DELETED')", name="ck_face_id_erasures_source"),)
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     source: Mapped[str] = mapped_column(String(10))

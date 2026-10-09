@@ -89,15 +89,16 @@ def get_user(user_id: UUID, db: Session = Depends(get_db)) -> dict:
     return success_response(_admin_user_data(user))
 
 
-@router.delete("/{user_id}", dependencies=[Depends(require_staff)])
-def delete_user(user_id: UUID, db: Session = Depends(get_db)) -> dict:
-    """Soft-delete a user by setting deleted_at and deactivating account."""
+@router.delete("/{user_id}")
+def delete_user(user_id: UUID, staff: StaffIdentity = Depends(require_staff), db: Session = Depends(get_db)) -> dict:
+    """Soft-delete a user (deactivate the account) and erase their Face ID with it."""
     user = db.get(User, user_id)
     if user is None or user.deleted_at is not None:
         raise AppError(404, "USER_NOT_FOUND", "Không tìm thấy người dùng.")
     user.deleted_at = datetime.now(UTC)
     user.account_status = "deactivated"
-    db.commit()
+    # A deleted profile must not leave biometric data behind; delete_face_profiles commits both.
+    delete_face_profiles(db, user_id, source="USER_DELETED", staff_id=staff.id, staff_username=staff.username)
     return success_response(
         {"user_id": str(user_id), "account_status": "deactivated"},
         "Đã xóa hồ sơ người dùng."

@@ -66,7 +66,7 @@ function FaceIdEraseDialog({ user, onClose, onErased }: { user: AdminUser; onClo
     <label className="field">Lý do<textarea maxLength={500} value={reason} disabled={busy} onChange={e => setReason(e.target.value)} placeholder="VD: Kiosk không còn nhận ra, SV mang thẻ đến quầy"/></label>
     <label className="checkbox-row"><input type="checkbox" checked={present} disabled={busy} onChange={e => setPresent(e.target.checked)}/> Sinh viên có mặt tại quầy và tôi đã kiểm tra thẻ sinh viên</label>
     {history && history.length > 0 && <div className="face-erase-history"><strong>Lịch sử xóa</strong><ul>{history.map(row => <li key={row.id}>
-      {new Date(row.created_at).toLocaleString("vi-VN")} · {row.source === "ADMIN" ? `quản trị viên ${row.staff_username ?? "?"}` : "sinh viên tự xóa tại kiosk"}{row.reason ? ` · ${row.reason}` : ""}</li>)}</ul></div>}
+      {new Date(row.created_at).toLocaleString("vi-VN")} · {row.source === "ADMIN" ? `quản trị viên ${row.staff_username ?? "?"}` : row.source === "USER_DELETED" ? `xóa cùng hồ sơ bởi ${row.staff_username ?? "?"}` : "sinh viên tự xóa tại kiosk"}{row.reason ? ` · ${row.reason}` : ""}</li>)}</ul></div>}
     {error && <p role="alert">{error}</p>}
     <div className="modal-actions">
       <button disabled={busy} className="secondary" onClick={onClose}>Hủy</button>
@@ -216,7 +216,7 @@ export default function UserManagementPage() {
     {/* Confirm delete dialog */}
     {confirmDelete && <div className="modal-overlay" onClick={() => { if (!deleting) setConfirmDelete(null); }}><div className="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title" onClick={e => e.stopPropagation()}>
       <h3 id="delete-title">Xác nhận xóa</h3>
-      <p>Bạn có chắc muốn xóa hồ sơ người dùng này? Thao tác này sẽ vô hiệu hóa tài khoản.</p>
+      <p>Bạn có chắc muốn xóa hồ sơ người dùng này? Thao tác này sẽ vô hiệu hóa tài khoản và xóa vĩnh viễn Face ID của người dùng (nếu có).</p>
       <div className="modal-actions">
         <button disabled={deleting} className="secondary" onClick={() => setConfirmDelete(null)}>Hủy</button>
         <button disabled={deleting} className="danger" onClick={() => handleDelete(confirmDelete)}>{deleting ? "Đang xóa…" : "Xóa"}</button>

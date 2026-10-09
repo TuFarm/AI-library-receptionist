@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import get_db
 from app.main import app
 from app.models.schema import (
-    AIRequest, AIResponse, DailyReportMetric, FaceAuthenticationLog, FaceProfile,
+    AIRequest, AIResponse, DailyReportMetric, FaceAuthenticationLog, FaceIdErasure, FaceProfile,
     InteractionEvent, StaffAccount, StaffSession, Survey, SurveyAnswer, SurveyQuestion, SurveyResponse, User,
     UserSession, Department, Major,
 )
@@ -28,7 +28,7 @@ MISSING = "11111111-1111-1111-1111-111111111111"
 @pytest.fixture
 def database():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    for model in (User, FaceProfile, UserSession, FaceAuthenticationLog, InteractionEvent,
+    for model in (User, FaceProfile, FaceIdErasure, UserSession, FaceAuthenticationLog, InteractionEvent,
                   AIRequest, AIResponse, Survey, SurveyQuestion, SurveyResponse, SurveyAnswer, DailyReportMetric,
                   Department, Major, StaffAccount, StaffSession):
         model.__table__.create(engine)
@@ -133,7 +133,7 @@ def test_librarian_reads_dashboards_but_cannot_manage_access_or_biometrics(datab
         app.dependency_overrides.update(previous)
 
 
-def test_profile_crud_preserves_biometric_record(client, database):
+def test_profile_crud_and_deletion_erases_the_face_id(client, database):
     created = client.post(USER_URL, json={**PROFILE, "full_name": "  Test Student  "})
     assert created.status_code == 201
     profile = created.json()["data"]
@@ -159,8 +159,9 @@ def test_profile_crud_preserves_biometric_record(client, database):
     database.expire_all()
     assert database.get(User, user_id).deleted_at is not None
     assert database.get(User, user_id).account_status == "deactivated"
-    retained = database.get(FaceProfile, face_id)
-    assert retained.active and retained.face_template_ref == "test-reference"
+    assert database.get(FaceProfile, face_id) is None
+    log = database.scalar(select(FaceIdErasure).where(FaceIdErasure.user_id == user_id))
+    assert (log.source, log.staff_username, log.deleted_profiles) == ("USER_DELETED", "test-admin", 1)
 
 
 @pytest.mark.parametrize("field,value", [

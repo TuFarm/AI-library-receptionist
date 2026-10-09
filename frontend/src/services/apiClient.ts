@@ -214,7 +214,7 @@ export type AdminUser = {
   /** Present in list results only. */
   has_face_id?: boolean;
 };
-export type FaceIdErasure = { id: string; source: "KIOSK" | "ADMIN"; staff_username: string | null; reason: string | null; deleted_profiles: number; created_at: string };
+export type FaceIdErasure = { id: string; source: "KIOSK" | "ADMIN" | "USER_DELETED"; staff_username: string | null; reason: string | null; deleted_profiles: number; created_at: string };
 
 export const adminUserApi = {
   list: (search = "", offset = 0, limit = 20) => adminClient.get<{ items: AdminUser[]; total: number }>(`/users?offset=${offset}&limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ""}`),
