@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     registration_stable_frames: int = 5
     registration_stable_ms: int = 700
     # Version of the Face ID consent text shown by the kiosk (frontend FACE_CONSENT_VERSION).
-    face_consent_version: str = Field(default="2026-10", min_length=1, max_length=20)
+    face_consent_version: str = Field(default="2026-10b", min_length=1, max_length=20)
     max_image_upload_mb: int = 5
     max_audio_upload_mb: int = 15
     # Knowledge documents for RAG (PDF, DOCX, XLSX, TXT, MD, CSV) and how many chunks an answer may cite.

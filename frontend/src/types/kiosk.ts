@@ -16,7 +16,8 @@ export type FaceGuideRect = {
 };
 
 export type KioskUser = {
-  id: string; student_code: string | null; full_name: string; email?: string | null; phone?: string | null;
+  /** `email` arrives masked (e.g. "ng***@st.hcmuaf.edu.vn"); kiosks never see the full address. */
+  id: string; student_code: string | null; full_name: string; email?: string | null;
   faculty?: string | null; major?: string | null;
   admission_year?: number | null; student_year?: number | null;
 };
@@ -30,7 +31,7 @@ export type FaceVerifyResult = {
   user: KioskUser | null; confidence_score: number | null; next_state: "WELCOME" | "FACE_UNKNOWN"; processing_time_ms?: number;
 };
 export type FaceRegistrationFields = {
-  full_name: string; student_code?: string; email?: string; phone?: string; faculty?: string; major?: string; admission_year?: number;
+  full_name: string; student_code?: string; email?: string; faculty?: string; major?: string; admission_year?: number;
   /** Sent only with Face ID enrollment, after the visitor accepted the consent step. */
   face_consent?: boolean;
 };

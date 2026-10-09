@@ -61,7 +61,7 @@ def client(database):
 PROTECTED = [
     ("GET", USER_URL), ("POST", USER_URL),
     ("GET", f"{USER_URL}/{MISSING}"), ("PATCH", f"{USER_URL}/{MISSING}"),
-    ("DELETE", f"{USER_URL}/{MISSING}"), ("DELETE", f"{USER_URL}/{MISSING}/face-profile"),
+    ("DELETE", f"{USER_URL}/{MISSING}"),
     ("POST", "/api/v1/departments"), ("PATCH", f"/api/v1/departments/{MISSING}"),
     ("POST", f"/api/v1/departments/{MISSING}/majors"), ("PATCH", f"/api/v1/departments/majors/{MISSING}"),
     ("GET", "/api/v1/admin/staff"), ("POST", "/api/v1/admin/staff"), ("GET", "/api/v1/admin/devices"),
@@ -111,12 +111,17 @@ def test_unknown_bearer_token_is_rejected(database, method, path):
 
 
 ADMIN_ONLY = [
-    ("DELETE", f"{USER_URL}/{MISSING}/face-profile"), ("GET", "/api/v1/admin/staff"),
+    ("GET", "/api/v1/admin/staff"),
     ("POST", "/api/v1/admin/staff"), ("GET", "/api/v1/admin/devices"), ("POST", "/api/v1/admin/devices"),
 ]
 
 
-def test_librarian_reads_dashboards_but_cannot_manage_access_or_biometrics(database):
+def test_no_staff_role_can_erase_a_face_id(admin_staff):
+    """Only the visitor, identified at a kiosk, erases their Face ID (consent text 2026-10b)."""
+    assert TestClient(app).delete(f"{USER_URL}/{MISSING}/face-profile").status_code in (404, 405)
+
+
+def test_librarian_reads_dashboards_but_cannot_manage_access(database):
     previous = app.dependency_overrides.copy()
     app.dependency_overrides[get_db] = lambda: database
     try:
@@ -133,7 +138,7 @@ def test_librarian_reads_dashboards_but_cannot_manage_access_or_biometrics(datab
 
 
 def test_profile_crud_preserves_biometric_record(client, database):
-    created = client.post(USER_URL, json={**PROFILE, "full_name": "  Test Student  ", "phone": "0901234567"})
+    created = client.post(USER_URL, json={**PROFILE, "full_name": "  Test Student  "})
     assert created.status_code == 201
     profile = created.json()["data"]
     assert profile["full_name"] == "Test Student"
@@ -144,10 +149,10 @@ def test_profile_crud_preserves_biometric_record(client, database):
     face_id = face.id
     url = f"{USER_URL}/{user_id}"
     assert client.get(url).json()["data"] == profile
-    updated = client.patch(url, json={"faculty": "Test Faculty", "major": "Test Major", "admission_year": 2024, "phone": None})
+    updated = client.patch(url, json={"faculty": "Test Faculty", "major": "Test Major", "admission_year": 2024})
     assert updated.status_code == 200
     assert updated.json()["data"]["faculty"] == "Test Faculty"
-    assert updated.json()["data"]["phone"] is None
+    assert "phone" not in updated.json()["data"]
     assert set(updated.json()["data"]) == set(profile)
     assert "face" not in updated.text
     assert client.delete(url).status_code == 200
@@ -164,7 +169,7 @@ def test_profile_crud_preserves_biometric_record(client, database):
 
 @pytest.mark.parametrize("field,value", [
     ("full_name", " "), ("full_name", None), ("email", "bad-address"),
-    ("phone", "-------"), ("phone", "1234567890123456"),
+    ("phone", "0901234567"),  # phone numbers are no longer collected at all
     ("student_code", "a b"), ("admission_year", 1989),
     ("admission_year", datetime.now(UTC).year + 2), ("admission_year", True),
     ("admission_year", 2024.5), ("faculty", "x" * 151), ("major", "x" * 151),

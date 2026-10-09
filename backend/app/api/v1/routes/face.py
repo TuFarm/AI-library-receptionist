@@ -26,9 +26,23 @@ from app.services.user_service import calculate_student_year
 router = APIRouter()
 
 
+def mask_email(email: str | None) -> str | None:
+    """Kiosk screens only ever see a hint like "ng***@st.hcmuaf.edu.vn", never the address."""
+    if not email or "@" not in email:
+        return None
+    local, domain = email.split("@", 1)
+    return f"{local[:2] if len(local) > 3 else local[:1]}***@{domain}"
+
+
+def is_masked_echo(user: User, email: str | None) -> bool:
+    """True when a kiosk sent back the masked hint it was shown, which must never replace the real address."""
+    return bool(email) and email == mask_email(user.email)
+
+
 def _user_data(user: User) -> dict:
+    """Profile as sent to kiosks (REST and stream): the email is masked."""
     return {"id": str(user.id), "student_code": user.student_code, "full_name": user.full_name,
-        "email": user.email, "phone": user.phone, "faculty": user.faculty, "major": user.major,
+        "email": mask_email(user.email), "faculty": user.faculty, "major": user.major,
         "admission_year": user.admission_year, "student_year": calculate_student_year(user.admission_year)}
 
 
@@ -68,7 +82,6 @@ async def enroll(
     full_name: str | None = Form(default=None),
     student_code: str | None = Form(default=None),
     email: str | None = Form(default=None),
-    phone: str | None = Form(default=None),
     faculty: str | None = Form(default=None),
     major: str | None = Form(default=None),
     admission_year: int | None = Form(default=None),
@@ -142,22 +155,21 @@ async def enroll(
             if not full_name or not full_name.strip():
                 raise AppError(422, "FULL_NAME_REQUIRED", "Vui lòng nhập họ và tên để đăng ký khuôn mặt.")
             user = User(full_name=full_name.strip(), student_code=student_code or None, email=email or None,
-                phone=phone or None, faculty=faculty or None, major=major or None, admission_year=admission_year,
+                faculty=faculty or None, major=major or None, admission_year=admission_year,
                 user_type="STUDENT", account_status="ACTIVE", preferred_language="vi")
             db.add(user)
             db.flush()
         elif user is claimed:
             # A claimed profile (pre-registered by staff) keeps its existing values.
             for field, value in (("full_name", full_name.strip() if full_name else None), ("student_code", student_code),
-                                 ("email", email), ("phone", phone), ("faculty", faculty), ("major", major),
+                                 ("email", email), ("faculty", faculty), ("major", major),
                                  ("admission_year", admission_year)):
                 if value not in (None, "") and getattr(user, field) in (None, ""):
                     setattr(user, field, value)
         else:
             if full_name: user.full_name = full_name.strip()
             if student_code: user.student_code = student_code
-            if email: user.email = email
-            if phone: user.phone = phone
+            if email and not is_masked_echo(user, email): user.email = email
             if faculty: user.faculty = faculty
             if major: user.major = major
             if admission_year is not None: user.admission_year = admission_year

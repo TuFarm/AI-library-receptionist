@@ -3,14 +3,14 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
-from app.api.deps import require_admin, require_staff
+from app.api.deps import require_staff
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.models.schema import User
 from app.core.responses import success_response
 from app.schemas.user import UserCreate, UserProfileUpdate
 from app.services.user_service import (
-    apply_profile_update, calculate_student_year, commit_profile, delete_face_profiles,
+    apply_profile_update, calculate_student_year, commit_profile,
 )
 
 router = APIRouter()
@@ -22,7 +22,6 @@ def _admin_user_data(user: User) -> dict:
         "student_code": user.student_code,
         "full_name": user.full_name,
         "email": user.email,
-        "phone": user.phone,
         "faculty": user.faculty,
         "major": user.major,
         "admission_year": user.admission_year,
@@ -99,13 +98,3 @@ def update_user(user_id: UUID, payload: UserProfileUpdate, db: Session = Depends
         raise AppError(404, "USER_NOT_FOUND", "Không tìm thấy người dùng.")
     apply_profile_update(db, user, payload.model_dump(exclude_unset=True))
     return success_response(_admin_user_data(user), "Cập nhật thông tin thành công.")
-
-
-@router.delete("/{user_id}/face-profile", dependencies=[Depends(require_admin)])
-def delete_face_profile(user_id: UUID, db: Session = Depends(get_db)) -> dict:
-    """Admin-only biometric erasure; kiosks use the session-scoped kiosk route."""
-    user = db.get(User, user_id)
-    if user is None or user.deleted_at is not None:
-        raise AppError(404, "USER_NOT_FOUND", "Không tìm thấy người dùng.")
-    deleted = delete_face_profiles(db, user_id)
-    return success_response({"user_id": str(user_id), "deleted_profiles": deleted}, "Đã xóa Face ID.")

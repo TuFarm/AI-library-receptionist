@@ -38,8 +38,9 @@ export default function WelcomeScreen({ user, welcomeContext, announce = true, f
   }, [announce, user, welcomeContext]);
   const beginEdit = () => {
     if (!user) return;
-    setFields({ full_name: user.full_name, student_code: user.student_code ?? undefined, email: user.email ?? undefined,
-      phone: user.phone ?? undefined, faculty: user.faculty ?? undefined, major: user.major ?? undefined,
+    // Email starts empty: the kiosk only knows a masked hint, and an empty field leaves the stored address unchanged.
+    setFields({ full_name: user.full_name, student_code: user.student_code ?? undefined,
+      faculty: user.faculty ?? undefined, major: user.major ?? undefined,
       admission_year: user.admission_year ?? undefined });
     setStatus(""); setEditing(true);
   };
@@ -50,7 +51,8 @@ export default function WelcomeScreen({ user, welcomeContext, announce = true, f
     event.preventDefault();
     if (!fields.full_name.trim()) { setStatus("Vui lòng nhập họ và tên."); return; }
     setBusy(true); setStatus("");
-    try { await onSave(fields); setEditing(false); setStatus("Đã lưu thông tin thành công."); }
+    const { email, ...rest } = fields;  // an empty email field means "keep the current address"
+    try { await onSave(email?.trim() ? { ...rest, email: email.trim() } : rest); setEditing(false); setStatus("Đã lưu thông tin thành công."); }
     catch (reason) { setStatus(reason instanceof Error ? reason.message : "Không thể lưu thông tin."); }
     finally { setBusy(false); }
   };
@@ -77,8 +79,7 @@ export default function WelcomeScreen({ user, welcomeContext, announce = true, f
       <div className="wizard-fields">
         <label>Họ và tên *<input required value={fields.full_name} onChange={e => update("full_name", e.target.value)}/></label>
         <label>Mã số sinh viên<input value={fields.student_code ?? ""} onChange={e => update("student_code", e.target.value)}/></label>
-        <label>Email<input type="email" value={fields.email ?? ""} onChange={e => update("email", e.target.value)}/></label>
-        <label>Số điện thoại<input value={fields.phone ?? ""} onChange={e => update("phone", e.target.value)}/></label>
+        <label>Email mới (để trống nếu không đổi)<input type="email" value={fields.email ?? ""} placeholder={user?.email ?? "email@student.hcmuaf.edu.vn"} onChange={e => update("email", e.target.value)}/></label>
         <label>Khoa<input value={fields.faculty ?? ""} onChange={e => update("faculty", e.target.value)}/></label>
         <label>Ngành học<input value={fields.major ?? ""} onChange={e => update("major", e.target.value)}/></label>
         <label>Năm nhập học<input type="number" min="1990" max="2100" value={fields.admission_year ?? ""} onChange={e => update("admission_year", e.target.value)}/></label>

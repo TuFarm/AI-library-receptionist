@@ -8,7 +8,6 @@ class UserProfileUpdate(BaseModel):
 
     full_name: str | None = Field(default=None, min_length=2, max_length=255)
     email: str | None = Field(default=None, max_length=320)
-    phone: str | None = Field(default=None, max_length=30)
     faculty: str | None = Field(default=None, max_length=150)
     major: str | None = Field(default=None, max_length=150)
     admission_year: int | None = Field(default=None, ge=1990, le=2100, strict=True)
@@ -19,14 +18,6 @@ class UserProfileUpdate(BaseModel):
     def valid_email(cls, value):
         if value and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
             raise ValueError("Email không hợp lệ")
-        return value or None
-
-    @field_validator("phone")
-    @classmethod
-    def valid_phone(cls, value):
-        if value and (not re.fullmatch(r"\+?[0-9() .-]{7,30}", value)
-                      or not 7 <= sum(char.isdigit() for char in value) <= 15):
-            raise ValueError("Số điện thoại không hợp lệ")
         return value or None
 
     @field_validator("student_code")
@@ -53,7 +44,6 @@ class UserCreate(BaseModel):
     student_code: str = Field(min_length=3, max_length=50)
     full_name: str = Field(min_length=2, max_length=255)
     email: str = Field(max_length=320)
-    phone: str | None = Field(default=None, max_length=30)
     faculty: str | None = Field(default=None, max_length=150)
     major: str | None = Field(default=None, max_length=150)
     admission_year: int | None = Field(default=None, ge=1990, le=2100, strict=True)
@@ -79,10 +69,3 @@ class UserCreate(BaseModel):
             raise ValueError("Mã sinh viên không hợp lệ")
         return value
 
-    @field_validator("phone")
-    @classmethod
-    def valid_phone(cls, value: str | None) -> str | None:
-        if value and (not re.fullmatch(r"\+?[0-9() .-]{7,30}", value)
-                      or not 7 <= sum(char.isdigit() for char in value) <= 15):
-            raise ValueError("Số điện thoại không hợp lệ")
-        return value or None

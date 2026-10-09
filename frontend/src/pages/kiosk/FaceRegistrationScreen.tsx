@@ -8,18 +8,19 @@ const newUserProgress = ["Thông tin", "Đồng ý", "Nhận diện khuôn mặt
 const reenrollmentProgress = ["Đồng ý", "Nhận diện khuôn mặt", "Xử lý", "Hoàn tất"];
 
 /** Must match the backend FACE_CONSENT_VERSION; bump both whenever this text changes. */
-export const FACE_CONSENT_VERSION = "2026-10";
+export const FACE_CONSENT_VERSION = "2026-10b";
 export const FACE_CONSENT_POINTS = [
-  "Thư viện chỉ lưu một mẫu số hóa của khuôn mặt (không lưu ảnh chụp) để nhận ra bạn ở các lần sau.",
+  "Thư viện chỉ lưu một mẫu số hóa của khuôn mặt (không lưu ảnh chụp), được mã hóa trên máy chủ thư viện, để nhận ra bạn ở các lần sau.",
   "Mẫu khuôn mặt chỉ dùng để chào và cá nhân hóa trợ lý tại kiosk, không dùng cho mục đích khác.",
-  "Bạn có thể xóa Face ID bất cứ lúc nào tại kiosk (mục hồ sơ) hoặc nhờ thủ thư.",
+  "Chỉ chính bạn mới xóa được Face ID của mình: sau khi kiosk nhận ra bạn, chọn \"Xóa Face ID\" trong mục hồ sơ, bất cứ lúc nào.",
   "Không đồng ý thì bạn vẫn dùng trợ lý bình thường với tư cách khách.",
 ];
 
 export function registrationFieldsForUser(user: KioskUser): FaceRegistrationFields {
   return {
-    full_name: user.full_name, student_code: user.student_code ?? undefined, email: user.email ?? undefined,
-    phone: user.phone ?? undefined, faculty: user.faculty ?? undefined, major: user.major ?? undefined,
+    // The kiosk only holds a masked email, so it is never sent back.
+    full_name: user.full_name, student_code: user.student_code ?? undefined,
+    faculty: user.faculty ?? undefined, major: user.major ?? undefined,
     admission_year: user.admission_year ?? undefined,
   };
 }
@@ -88,7 +89,6 @@ export default function FaceRegistrationScreen({ videoRef, cameraStatus, cameraE
           <label>Khoa<input value={fields.faculty ?? ""} onChange={(event) => update("faculty", event.target.value)} placeholder="Khoa Công nghệ Thông tin"/></label>
           <label>Ngành<input value={fields.major ?? ""} onChange={(event) => update("major", event.target.value)} placeholder="Công nghệ thông tin"/></label>
           <label>Khóa tuyển sinh<input type="number" min="1990" max="2100" value={fields.admission_year ?? ""} onChange={(event) => update("admission_year", event.target.value)} placeholder="2024"/></label>
-          <label>Số điện thoại<input value={fields.phone ?? ""} onChange={(event) => update("phone", event.target.value)} placeholder="Số điện thoại"/></label>
         </>}
       </div>
       {error && <div className="registration-error" role="alert">{error}</div>}

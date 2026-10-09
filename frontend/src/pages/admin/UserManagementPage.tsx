@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { PageHeader } from "../../components/ui";
 import { adminUserApi, ApiClientError, type AdminUser } from "../../services/apiClient";
 
-const emptyForm = { student_code: "", full_name: "", email: "", phone: "", faculty: "", major: "", admission_year: "" };
+const emptyForm = { student_code: "", full_name: "", email: "", faculty: "", major: "", admission_year: "" };
 type UserForm = typeof emptyForm;
 type FieldErrors = Partial<Record<keyof UserForm, string>>;
 
@@ -11,7 +11,6 @@ function userToForm(user: AdminUser): UserForm {
     student_code: user.student_code ?? "",
     full_name: user.full_name,
     email: user.email ?? "",
-    phone: user.phone ?? "",
     faculty: user.faculty ?? "",
     major: user.major ?? "",
     admission_year: user.admission_year?.toString() ?? "",
@@ -30,7 +29,6 @@ export function validateForm(form: UserForm, isEdit: boolean): FieldErrors {
   if (form.major.trim().length > 150) errors.major = "Ngành tối đa 150 ký tự";
   if (!isEdit && !form.email.trim()) errors.email = "Email là bắt buộc";
   else if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) errors.email = "Email không hợp lệ";
-  if (form.phone.trim() && (!/^\+?[0-9() .\-]{7,30}$/.test(form.phone.trim()) || !/^[0-9]{7,15}$/.test(form.phone.replace(/[^0-9]/g, "")))) errors.phone = "Số điện thoại không hợp lệ";
   if (form.admission_year) {
     const year = Number(form.admission_year);
     if (!Number.isInteger(year) || year < 1990 || year > new Date().getFullYear() + 1) errors.admission_year = "Năm nhập học từ 1990 đến năm sau";
@@ -40,7 +38,7 @@ export function validateForm(form: UserForm, isEdit: boolean): FieldErrors {
 
 const FIELD_LABELS: Record<string, string> = {
   student_code: "Mã sinh viên", full_name: "Họ và tên", email: "Email",
-  phone: "Số điện thoại", faculty: "Khoa", major: "Ngành", admission_year: "Năm nhập học",
+  faculty: "Khoa", major: "Ngành", admission_year: "Năm nhập học",
 };
 
 export default function UserManagementPage() {
@@ -101,7 +99,6 @@ export default function UserManagementPage() {
     setSaving(true); setError("");
     const payload = {
       ...form,
-      phone: form.phone || null,
       faculty: form.faculty || null,
       major: form.major || null,
       admission_year: form.admission_year ? Number(form.admission_year) : null,

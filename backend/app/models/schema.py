@@ -46,7 +46,6 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     student_code: Mapped[str | None] = mapped_column(String(50), unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String(255))
     email: Mapped[str | None] = mapped_column(String(320), unique=True, index=True)
-    phone: Mapped[str | None] = mapped_column(String(30))
     user_type: Mapped[str] = mapped_column(String(30), index=True)
     account_status: Mapped[str] = mapped_column(String(30), index=True)
     preferred_language: Mapped[str | None] = mapped_column(String(10))

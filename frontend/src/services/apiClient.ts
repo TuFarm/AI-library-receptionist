@@ -20,7 +20,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   try { body = await response.json() as ApiEnvelope<T>; } catch { /* invalid server response */ }
   if (!response.ok || !body?.success) {
     const fieldErrors: Record<string, string> = {};
-    const labels: Record<string, string> = { username: "Tên đăng nhập", password: "Mật khẩu", current_password: "Mật khẩu hiện tại", new_password: "Mật khẩu mới", full_name: "Họ và tên", student_code: "Mã sinh viên", email: "Email", phone: "Số điện thoại", faculty: "Khoa", major: "Ngành", admission_year: "Năm nhập học", title: "Tiêu đề", content: "Nội dung", survey_name: "Tên khảo sát", description: "Mô tả", question_text: "Nội dung câu hỏi", questions: "Danh sách câu hỏi" };
+    const labels: Record<string, string> = { username: "Tên đăng nhập", password: "Mật khẩu", current_password: "Mật khẩu hiện tại", new_password: "Mật khẩu mới", full_name: "Họ và tên", student_code: "Mã sinh viên", email: "Email", faculty: "Khoa", major: "Ngành", admission_year: "Năm nhập học", title: "Tiêu đề", content: "Nội dung", survey_name: "Tên khảo sát", description: "Mô tả", question_text: "Nội dung câu hỏi", questions: "Danh sách câu hỏi" };
     if (response.status === 422 && Array.isArray(body?.error?.details)) {
       for (const detail of body.error.details as Array<{ loc?: string[]; type?: string }>) {
         const field = detail.loc?.at(-1);
@@ -205,7 +205,6 @@ export type AdminUser = {
   student_code: string | null;
   full_name: string;
   email: string | null;
-  phone: string | null;
   faculty: string | null;
   major: string | null;
   admission_year: number | null;
@@ -217,7 +216,7 @@ export type AdminUser = {
 export const adminUserApi = {
   list: (search = "", offset = 0, limit = 20) => adminClient.get<{ items: AdminUser[]; total: number }>(`/users?offset=${offset}&limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ""}`),
   create: (payload: Omit<AdminUser, "id" | "student_year" | "user_type" | "account_status"> & { student_code: string; email: string }) => adminClient.post<AdminUser>("/users", payload),
-  update: (id: string, payload: Partial<Pick<AdminUser, "student_code" | "full_name" | "email" | "phone" | "faculty" | "major" | "admission_year">>) => adminClient.patch<AdminUser>(`/users/${id}`, payload),
+  update: (id: string, payload: Partial<Pick<AdminUser, "student_code" | "full_name" | "email" | "faculty" | "major" | "admission_year">>) => adminClient.patch<AdminUser>(`/users/${id}`, payload),
   get: (id: string) => adminClient.get<AdminUser>(`/users/${id}`),
   delete: (id: string) => adminClient.delete<{ user_id: string; account_status: string }>(`/users/${id}`),
 };

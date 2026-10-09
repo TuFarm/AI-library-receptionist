@@ -84,8 +84,7 @@ describe("kiosk recognition and welcome UI", () => {
   it("re-enrollment keeps the current profile and opens directly on face capture", () => {
     const profile = { ...user, email: "an@example.test", faculty: "CNTT", admission_year: 2024 };
     expect(registrationFieldsForUser(profile)).toEqual({
-      full_name: "Nguyễn Văn An", student_code: "001", email: "an@example.test",
-      phone: undefined, faculty: "CNTT", major: undefined, admission_year: 2024,
+      full_name: "Nguyễn Văn An", student_code: "001", faculty: "CNTT", major: undefined, admission_year: 2024,
     });
     const html = renderToStaticMarkup(<FaceRegistrationScreen existingUser={profile} videoRef={noRef}
       cameraStatus="READY" busy={false} captureFrame={async () => new Blob()}

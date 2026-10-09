@@ -212,7 +212,7 @@ def test_kiosk_profile_actions_are_limited_to_the_identified_visitor(admin, use_
         assert deleted.status_code == 200 and deleted.json()["data"]["deleted_profiles"] == 1
         # The old unscoped routes are no longer reachable with only a device key.
         assert kiosk.patch(f"/api/v1/users/{user.id}", json={"major": "X"}, headers=a).status_code == 401
-        assert kiosk.delete(f"/api/v1/users/{user.id}/face-profile", headers=a).status_code == 401
+        assert kiosk.delete(f"/api/v1/users/{user.id}/face-profile", headers=a).status_code == 404
         session.ended_at = datetime.now(UTC)
         use_db.commit()
         ended = kiosk.patch(f"/api/v1/kiosk/sessions/{session.id}/profile", json={"major": "Y"}, headers=a)

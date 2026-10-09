@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.deps import owned_session, require_kiosk_device
-from app.api.v1.routes.face import _user_data
+from app.api.v1.routes.face import _user_data, is_masked_echo
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.responses import success_response
@@ -66,7 +66,13 @@ def create_event(session_id: UUID, payload: KioskEventCreate, device: Device = D
 def update_session_profile(session_id: UUID, payload: UserProfileUpdate,
                            device: Device = Depends(require_kiosk_device), db: Session = Depends(get_db)) -> dict:
     session = owned_session(db, session_id, device, active=True)
-    user = apply_profile_update(db, _identified_user(db, session), payload.model_dump(exclude_unset=True))
+    user = _identified_user(db, session)
+    changes = payload.model_dump(exclude_unset=True)
+    if is_masked_echo(user, changes.get("email")):
+        changes.pop("email")
+    if not changes:
+        return success_response(_user_data(user), "Cập nhật thông tin thành công.")
+    user = apply_profile_update(db, user, changes)
     record_event(db, event_type="PROFILE_UPDATED", session_id=session.id, user_id=user.id, device_id=device.id)
     db.commit()
     return success_response(_user_data(user), "Cập nhật thông tin thành công.")
