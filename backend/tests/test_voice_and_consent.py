@@ -1,4 +1,4 @@
-"""Server-side speech recognition (Electron fallback) and Face ID consent lifecycle."""
+"""Server-side speech recognition (fallback when Web Speech is unavailable) and Face ID consent lifecycle."""
 import base64
 from datetime import UTC, datetime
 

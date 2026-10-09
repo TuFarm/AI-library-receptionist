@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     voice_provider: str = "mock"
     ai_provider: str = "mock"
     kiosk_session_timeout_seconds: int = 60
-    kiosk_stream_origins: str = "http://localhost:5173,http://127.0.0.1:5173,null"
+    kiosk_stream_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     face_confidence_threshold: float = 0.75
     face_distance_threshold: float = 0.60
     registration_stable_frames: int = 5

@@ -5,17 +5,15 @@ import { voiceApi } from "../services/apiClient";
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("voice input selection", () => {
-  const browser = { browserSpeech: true, mediaRecorder: true, electron: false };
-  const electron = { browserSpeech: true, mediaRecorder: true, electron: true };
-  it("auto uses Web Speech in browsers and server STT in Electron", () => {
+  const browser = { browserSpeech: true, mediaRecorder: true };
+  it("auto prefers Web Speech and falls back to server STT", () => {
     expect(chooseVoiceInput(undefined, browser)).toBe("browser");
-    expect(chooseVoiceInput("auto", electron)).toBe("server");
     expect(chooseVoiceInput("auto", { ...browser, browserSpeech: false })).toBe("server");
-    expect(chooseVoiceInput("auto", { browserSpeech: false, mediaRecorder: false, electron: false })).toBeNull();
+    expect(chooseVoiceInput("auto", { browserSpeech: false, mediaRecorder: false })).toBeNull();
   });
   it("honours an explicit mode only when the device supports it", () => {
     expect(chooseVoiceInput("server", browser)).toBe("server");
-    expect(chooseVoiceInput("BROWSER", electron)).toBe("browser");
+    expect(chooseVoiceInput("BROWSER", browser)).toBe("browser");
     expect(chooseVoiceInput("server", { ...browser, mediaRecorder: false })).toBeNull();
     expect(chooseVoiceInput("browser", { ...browser, browserSpeech: false })).toBeNull();
   });

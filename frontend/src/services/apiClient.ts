@@ -76,7 +76,7 @@ export const userApi = {
   deleteFaceId: (sessionId: string) => apiClient.delete<{ user_id: string; deleted_profiles: number }>(`/kiosk/sessions/${sessionId}/face-profile`),
 };
 export const voiceApi = {
-  /** Server-side STT for one recorded utterance (used where Web Speech is unavailable, e.g. Electron). */
+  /** Server-side STT for one recorded utterance (used where Web Speech is unavailable, e.g. Firefox). */
   transcribe: (audio: Blob) => {
     const form = new FormData();
     form.append("audio_file", audio, "utterance.webm");

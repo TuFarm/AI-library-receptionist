@@ -32,7 +32,7 @@ class VoiceService:
         return TranscriptionResult("Thư viện mở cửa lúc mấy giờ?", "mock")
 
     def _gemini(self, path: Path) -> TranscriptionResult:
-        """Server-side STT for kiosks without Web Speech (e.g. Electron), using the configured Gemini model."""
+        """Server-side STT for kiosk browsers without Web Speech (e.g. Firefox), using the configured Gemini model."""
         mime_type = AUDIO_MIME_TYPES.get(path.suffix.lower(), "audio/webm")
         payload = {"contents": [{"role": "user", "parts": [
             {"inline_data": {"mime_type": mime_type, "data": base64.b64encode(path.read_bytes()).decode("ascii")}},

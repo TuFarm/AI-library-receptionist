@@ -75,7 +75,6 @@ export default function KioskVoiceChatScreen({ flow }: { flow: ReturnType<typeof
   const serverRecognition = useServerSpeechRecognition(onVoiceTranscript);
   const inputMode = chooseVoiceInput(import.meta.env.VITE_VOICE_INPUT as string | undefined, {
     browserSpeech: browserRecognition.isSupported, mediaRecorder: serverRecognition.isSupported,
-    electron: typeof navigator !== "undefined" && /electron/i.test(navigator.userAgent),
   });
   const recognition = inputMode === "server" ? serverRecognition : { ...browserRecognition, isSupported: inputMode === "browser" };
   recognitionControlRef.current = {

@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MOCK_FALLBACK_ENABLED, voiceApi } from "../services/apiClient";
 
-/** Voice input source: Web Speech in the browser, or recording + server STT (needed in Electron). */
+/** Voice input source: Web Speech in the browser, or recording + server STT where Web Speech is unavailable (e.g. Firefox). */
 export type VoiceInputMode = "browser" | "server";
 
-export function chooseVoiceInput(setting: string | undefined, env: { browserSpeech: boolean; mediaRecorder: boolean; electron: boolean }): VoiceInputMode | null {
+export function chooseVoiceInput(setting: string | undefined, env: { browserSpeech: boolean; mediaRecorder: boolean }): VoiceInputMode | null {
   const mode = (setting ?? "auto").toLowerCase();
   if (mode === "browser") return env.browserSpeech ? "browser" : null;
   if (mode === "server") return env.mediaRecorder ? "server" : null;
-  // Electron exposes webkitSpeechRecognition but has no speech service behind it.
-  if (env.browserSpeech && !env.electron) return "browser";
+  if (env.browserSpeech) return "browser";
   return env.mediaRecorder ? "server" : null;
 }
 

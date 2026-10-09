@@ -15,7 +15,7 @@ frontend/dist/
 .vscode/
 
 
-# Chặn hoàn toàn các file và thư mục tạm sinh ra từ Electron/Build
+# Chặn các file và thư mục build cũ (kể cả bản đóng gói Electron trước đây)
 frontend/release/
 **/win-unpacked.tmp/
 *.exe

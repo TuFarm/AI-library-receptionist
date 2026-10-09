@@ -7,9 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "test": "vitest run",
-    "preview": "vite preview",
-    "electron:dev": "concurrently -k \"npm run dev\" \"wait-on tcp:5173 && electron electron/main.js\"",
-    "electron:build": "npm run build && electron-builder"
+    "preview": "vite preview"
   },
   "dependencies": {
     "react": "^19.2.8",
@@ -20,30 +18,8 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^6.1.1",
-    "concurrently": "^10.0.5",
-    "electron": "^44.0.0",
-    "electron-builder": "^26.15.3",
-    "electron-is-dev": "^3.0.1",
     "typescript": "^7.0.2",
     "vite": "^8.2.2",
-    "vitest": "^5.0.0",
-    "wait-on": "^9.1.0"
-  },
-  "main": "electron/main.js",
-  "build": {
-    "appId": "com.aiintegratedlibrary.kiosk",
-    "productName": "AI Library Kiosk",
-    "files": [
-      "dist/**/*",
-      "electron/**/*",
-      "package.json"
-    ],
-    "directories": {
-      "buildResources": "electron/resources",
-      "output": "release"
-    },
-    "win": {
-      "target": "nsis"
-    }
+    "vitest": "^5.0.0"
   }
 }

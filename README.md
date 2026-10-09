@@ -4,7 +4,7 @@
 
 ## Purpose and scope
 
-This is an AI receptionist for a university library: a fullscreen visitor kiosk plus a separate staff admin UI. The kiosk identifies a visitor by face, accepts library questions through speech/text, offers simple book suggestions, and can collect a survey. Admin has dashboard, knowledge, conversation, user, survey, report, and feature-status views.
+This is an AI receptionist for a university library: a fullscreen visitor kiosk plus a separate staff admin UI, both served as one web app (the kiosk is the `/kiosk/fullscreen` route opened in a browser; there is no desktop/Electron build). The kiosk identifies a visitor by face, accepts library questions through speech/text, offers simple book suggestions, and can collect a survey. Admin has dashboard, knowledge, conversation, user, survey, report, and feature-status views.
 
 It is **not** a library-management system. Do not add catalog, author, publisher, shelf, copy, lending/return, or circulation management unless scope is explicitly expanded. `suggested_books.external_book_id` is the link to the existing library system.
 
@@ -22,7 +22,6 @@ It is **not** a library-management system. Do not add catalog, author, publisher
 | `frontend/src/hooks/` | Kiosk flow, camera, speech recognition, TTS. |
 | `frontend/src/runtime/` | Event bus, WebSocket, state guard, camera manager, realtime sensor. |
 | `frontend/src/pages/admin/` | Admin pages; separate from kiosk UI. |
-| `frontend/electron/` | Electron main/preload; packaged kiosk uses MemoryRouter. |
 | `docker-compose.yml` | Production-like full stack: Nginx frontend, FastAPI, migrations, PostgreSQL 16, and Redis 7. |
 
 ## Architecture
@@ -62,7 +61,7 @@ Realtime frames remain in memory. Camera requests 1920×1080 preferably (1280×7
 
 Voice is turn-based, not Gemini Live/full-duplex: greeting → STT (`vi-VN`) → final transcript → AI request → browser TTS → listening. Keyboard input is always a fallback, and every answer is also shown as text. Raw microphone audio is not sent through the WebSocket.
 
-`VITE_VOICE_INPUT` picks the STT source: `auto` (default) uses browser Web Speech, except in Electron, which exposes `webkitSpeechRecognition` without a working speech service; there the kiosk records one utterance with `MediaRecorder` (it ends after 1.2 s of silence, 15 s at most, and is discarded if nobody spoke) and posts it to `POST /voice/transcribe`. `browser` or `server` force one source. Server STT needs `VOICE_PROVIDER=gemini` and `GEMINI_API_KEY`: the utterance is sent inline to the configured `GEMINI_MODEL`, the temporary file is deleted afterwards (unless `MEDIA_RETAIN_DEVELOPMENT_FILES`), and a failure or silence returns an empty transcript rather than a guess. Enabling it sends visitors' voice to Google, so the deployment's privacy notice must say so. The mock provider returns a fixed sentence for tests; the kiosk refuses to submit it as a question unless `VITE_ENABLE_MOCK_FALLBACK=true`. Speech output still uses the OS voices behind `speechSynthesis`; install a Vietnamese voice on Electron kiosks.
+`VITE_VOICE_INPUT` picks the STT source: `auto` (default) uses browser Web Speech (Chrome/Edge); in browsers without it (e.g. Firefox) the kiosk records one utterance with `MediaRecorder` (it ends after 1.2 s of silence, 15 s at most, and is discarded if nobody spoke) and posts it to `POST /voice/transcribe`. `browser` or `server` force one source. Server STT needs `VOICE_PROVIDER=gemini` and `GEMINI_API_KEY`: the utterance is sent inline to the configured `GEMINI_MODEL`, the temporary file is deleted afterwards (unless `MEDIA_RETAIN_DEVELOPMENT_FILES`), and a failure or silence returns an empty transcript rather than a guess. Enabling it sends visitors' voice to Google, so the deployment's privacy notice must say so. The mock provider returns a fixed sentence for tests; the kiosk refuses to submit it as a question unless `VITE_ENABLE_MOCK_FALLBACK=true`. Speech output still uses the OS voices behind `speechSynthesis`; install a Vietnamese voice on the kiosk machine.
 
 ## API
 
@@ -175,8 +174,7 @@ change test results; explicitly exported environment variables still win.
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request:
 the backend suite, `alembic upgrade head` → `downgrade base` → `upgrade head` on a PostgreSQL 16
 service, a start-up check against the migrated database, and the frontend `npm ci`, `npm test`
-and `npm run build` (the Electron binary download is skipped). Frontend dependencies are pinned
-with caret ranges and locked in `package-lock.json`.
+and `npm run build`. Frontend dependencies are pinned with caret ranges and locked in `package-lock.json`.
 
 Migrations are explicit DDL. The initial revision is frozen to the original 24 tables;
 every later model change needs its own revision. `tests/test_migrations.py` renders
@@ -235,7 +233,7 @@ chunks an answer used, and the kiosk shows them as *Nguồn* under the answer.
 ## Providers and limits
 
 - `FACE_PROVIDER=mock` runs without native packages. `local` lazily uses `face_recognition`/dlib (CPU HOG, 128-d encodings) and can require CMake/Visual C++ Build Tools on Windows. `local_opencv` is an opt-in YuNet + SFace ONNX provider; it is not the default and never downloads model files at runtime.
-- `VOICE_PROVIDER=gemini` provides server-side STT for Electron kiosks (see *Kiosk flow*); `mock` is for tests only, and `browser` disables server STT.
+- `VOICE_PROVIDER=gemini` provides server-side STT for kiosk browsers without Web Speech (see *Kiosk flow*); `mock` is for tests only, and `browser` disables server STT.
 - `AI_PROVIDER=mock` is default. `gemini` calls Gemini `generateContent` through `httpx`, with recent context and a Vietnamese receptionist prompt. Provider errors fall back safely to a concise mock answer and are recorded as fallback/failed—not grounded.
 - No vector stack/pgvector, OCR for scanned PDFs, liveness, mTLS/hardware-backed device identity, or unattended-installation certification exists yet. Staff RBAC and per-kiosk keys are described under *Access control*.
 
@@ -304,7 +302,7 @@ npm install
 npm run dev
 ```
 
-Visit `http://localhost:5173/kiosk/fullscreen` or `/admin/dashboard`. Inside `frontend`, `npm run electron:dev` starts Electron and `npm run electron:build` packages it.
+Visit `http://localhost:5173/kiosk/fullscreen` or `/admin/dashboard`. For an unattended kiosk, open that URL in Chrome/Edge kiosk mode (e.g. `chrome --kiosk https://<host>/kiosk/fullscreen`); browsers only grant camera/microphone on HTTPS or `localhost`.
 
 ```dotenv
 # backend/.env
@@ -340,7 +338,7 @@ Optional local face support is in `backend/requirements-face-local.txt`; install
 
 Install `backend/requirements-face-opencv.txt` only on hosts that will explicitly use
 `FACE_PROVIDER=local_opencv`. The pinned package is the headless OpenCV build because
-camera capture and UI remain in Electron/React. OpenCV supplies its compatible NumPy
+camera capture and UI remain in the browser (React). OpenCV supplies its compatible NumPy
 dependency; Pillow is pinned explicitly for the existing WebSocket frame decoder.
 
 Provision both reviewed model files outside Git and set absolute paths in the backend
@@ -424,7 +422,7 @@ python scripts/benchmark_face_pipeline.py --provider local_opencv `
 
 Set `FACE_DIAGNOSTICS_ENABLED=true` only for the controlled benchmark run; keep it false in
 production so boxes, landmarks, quality metrics, distances, and provider diagnostics are not
-sent to the Electron client. The real run reports P50/P95 for frame decode, YuNet detection, quality/tracking, SFace
+sent to the kiosk browser. The real run reports P50/P95 for frame decode, YuNet detection, quality/tracking, SFace
 embedding, profile query, gallery matching, WebSocket/client round-trip, and total time.
 It exits with code `2` when total P95 exceeds 3000 ms. Output contains aggregate timing
 only—never the fixture path, image bytes, face coordinates, user ID, or embedding. The
@@ -490,7 +488,7 @@ Before the run:
   privacy-safe latency summaries. Passing mocks establishes these contracts, not biometric
   accuracy.
 
-Run the following cases through the packaged kiosk unless a case explicitly says REST API.
+Run the following cases through the kiosk web page unless a case explicitly says REST API.
 Inspect only status, error code, profile metadata/version, aggregate counters, and identity
 label shown by the kiosk; do not enable verbose frame/model logging.
 
@@ -513,7 +511,7 @@ post-warm-up latency samples as described above. The performance gate is total P
 than 3000 ms from accepted stability to the rendered result on the target CPU kiosk. Never
 relax exact-one-face or quality gates to meet it.
 
-Go only when every case above passes, the real-provider automated tests and packaged-kiosk
+Go only when every case above passes, the real-provider automated tests and kiosk-browser
 smoke test pass, total P95 meets the target, no tested A/B sample is attributed to the other
 person, failed enrollment causes no profile mutation, model failure is fail-closed, no
 biometric data appears in logs/events/artifacts, and a rollback drill has succeeded. The
@@ -557,26 +555,25 @@ policies. Do not infer encryption merely from the column name.
 ### Backend server and kiosk LAN deployment
 
 Keep OpenCV, both ONNX models, PostgreSQL access, and all face templates on the backend
-server. Kiosks need only the packaged Electron application, a camera, and network access to
-the configured backend URL. Run Uvicorn behind a managed reverse proxy, binding the private
+server. Kiosks need only a current Chrome/Edge browser, a camera, a microphone, and network access to
+the HTTPS site serving the frontend and backend. Run Uvicorn behind a managed reverse proxy, binding the private
 application listener deliberately (for example `--host 0.0.0.0`) and restricting its port at
 the host/network firewall. Terminate TLS at the reverse proxy and expose only HTTPS/WSS to
 kiosks, even on the school LAN.
 
-Build each production kiosk with `VITE_API_BASE_URL` set to the stable HTTPS backend DNS
+Build the production frontend with `VITE_API_BASE_URL` set to the stable HTTPS backend DNS
 name, not a hard-coded machine IP or localhost. The WebSocket URL is derived from this value
 and becomes WSS automatically. Also build with `VITE_ENABLE_DEV_CONTROLS=false` and
 `VITE_ENABLE_MOCK_FALLBACK=false`. Because Vite embeds these values at build time, changing
-them requires rebuilding the Electron renderer/package.
+them requires rebuilding the frontend image (`frontend/Dockerfile`).
 
-Set `KIOSK_STREAM_ORIGINS` to the smallest reviewed comma-separated allowlist. Packaged
-Electron currently uses a `file://` renderer and therefore sends the `null` WebSocket origin;
-origin allowlisting alone is not device authentication; each kiosk must also hold its own
+Set `KIOSK_STREAM_ORIGINS` to the smallest reviewed comma-separated allowlist: the exact
+HTTPS origin(s) the kiosk page is served from. Never add `null`; origin allowlisting alone is not device authentication; each kiosk must also hold its own
 device key (see *Access control*). A key stored on the kiosk can be copied by anyone with
 physical or OS access to it, so still restrict the backend to the kiosk VLAN/firewall and
 consider mTLS before treating a shared or hostile LAN as trusted; rotate a key whenever a
 kiosk is serviced or lost. Do not hard-code server addresses in source or copy ONNX models into
-the Electron package.
+the frontend bundle.
 
 The cached OpenCV detector and recognizer are protected by process-local locks because their
 DNN wrapper state is mutable. This is safe for concurrent requests but serializes inference

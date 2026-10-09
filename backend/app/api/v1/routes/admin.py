@@ -109,7 +109,7 @@ def status(db: Session = Depends(get_db)) -> dict:
         {"module": "RAG", "status": f"{documents} tài liệu",
          "warning": None if documents else "Chưa có tài liệu tri thức đang hoạt động; AI sẽ từ chối trả lời thông tin chính thức."},
         {"module": "Voice", "status": settings.voice_provider,
-         "warning": "Nhận dạng giọng nói chạy trên trình duyệt kiosk; Electron có thể không hỗ trợ Web Speech."
+         "warning": "Nhận dạng giọng nói chạy trên trình duyệt kiosk; trình duyệt không có Web Speech (như Firefox) sẽ chỉ nhập bằng bàn phím."
             if settings.voice_provider in {"mock", "browser"} else None},
         {"module": "Báo cáo ngày", "status": "Tự động" if settings.report_job_enabled else "Thủ công",
          "warning": (f"Lần chạy gần nhất lỗi: {job_state.last_error}" if job_state.last_error else
