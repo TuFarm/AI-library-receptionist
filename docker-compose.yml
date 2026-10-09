@@ -98,6 +98,11 @@ services:
     restart: unless-stopped
     ports:
       - "${APP_PORT:-80}:8080"
+      # HTTPS stays on 443: the HTTP→HTTPS redirect uses the bare host name.
+      - "443:8443"
+    volumes:
+      # server.pem + server-key.pem from mkcert; Nginx does not start without them.
+      - ./certs:/etc/nginx/certs:ro
     depends_on:
       backend:
         condition: service_healthy

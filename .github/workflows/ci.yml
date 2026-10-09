@@ -68,3 +68,32 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+
+  compose-smoke:
+    # Builds and starts the LAN deployment stack exactly as the server runs it, over HTTPS.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure .env and a throwaway certificate
+        run: |
+          cp .env.production.example .env
+          sed -i 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci-only-password/' .env
+          sed -i 's#^KIOSK_STREAM_ORIGINS=.*#KIOSK_STREAM_ORIGINS=https://localhost#' .env
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
+            -addext subjectAltName=DNS:localhost \
+            -keyout certs/server-key.pem -out certs/server.pem
+          chmod 644 certs/server-key.pem
+      - name: Start the stack
+        run: docker compose up -d --build --wait
+      - name: HTTPS serves the app, HTTP redirects, /health stays on HTTP
+        run: |
+          curl -fsk https://localhost/health
+          curl -fsk https://localhost/kiosk/fullscreen | grep -q '<div id="root">'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost/kiosk/fullscreen)" = 301
+          curl -s -o /dev/null -w '%{redirect_url}\n' http://localhost/kiosk/fullscreen | grep -qx 'https://localhost/kiosk/fullscreen'
+          curl -fs http://localhost/health
+      - name: Admin scripts are in the backend image
+        run: docker compose exec -T backend python scripts/create_staff.py --help
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs

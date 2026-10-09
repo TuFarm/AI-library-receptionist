@@ -28,4 +28,8 @@ backend/storage/media/**
 backend/models/
 backend/storage/admin/
 *.onnx
+# TLS certificates and keys for the LAN server stay on that server.
+certs/*
+!certs/.gitkeep
+*.pem
 *.tsbuildinfo

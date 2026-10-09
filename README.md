@@ -260,31 +260,31 @@ proxies API/WebSocket traffic to FastAPI. Database migrations run before the bac
 
 ```bash
 cp .env.production.example .env
-# Edit .env: set a strong POSTGRES_PASSWORD, APP_PORT, allowed origin, and providers.
+# Edit .env: set a strong POSTGRES_PASSWORD, allowed origin, and providers.
+# Put certs/server.pem and certs/server-key.pem in place first (see LAN deployment).
 docker compose up -d --build --wait
 docker compose ps
-curl --fail http://localhost/health
+curl --fail https://localhost/health
 ```
 
-If `APP_PORT` is not `80`, include it in the URL (for example,
-`http://localhost:8080/health`). Open `/kiosk/fullscreen` or `/admin/dashboard` through the
-same public URL. Follow logs with `docker compose logs -f backend frontend`; stop the stack
+Nginx serves the app on HTTPS port 443; `APP_PORT` (default 80) only redirects to it, apart
+from `/health`, which the container healthcheck uses. Open `/kiosk/fullscreen` or
+`/admin/dashboard` through `https://<server>`. If `up` hangs on the frontend, check
+`docker compose logs frontend`: Nginx refuses to start without both certificate files. Follow logs with `docker compose logs -f backend frontend`; stop the stack
 with `docker compose down`. Named volumes preserve PostgreSQL, Redis, and uploaded media.
 Use `docker compose down --volumes` only when intentionally deleting that data.
 
 The target deployment is this stack on one server inside the library LAN; kiosks and staff
 open it from browsers on the same network (see *Backend server and kiosk LAN deployment*).
 `migrate` applies Alembic migrations on every `up`, so there is no separate migration step.
-Keep database/Redis ports private and keep the server's `.env` out of Git. Browsers grant
-camera/microphone only on HTTPS (or `localhost`), and this stack serves plain HTTP, so kiosks
-on other machines need TLS in front of it (for example a certificate from an internal CA on
-a reverse proxy) with `KIOSK_STREAM_ORIGINS` set to that exact `https://` origin.
+Keep database/Redis ports private and keep the server's `.env` and `certs/` out of Git.
 
 A Cloudflare quick tunnel is for testing only, never for real visitors: it exposes the
 machine to the internet and gives HTTPS for free. For the dev server run
 `cloudflared tunnel --url http://localhost:5173` and put the printed host in
-`DEV_ALLOWED_HOSTS` (`frontend/.env`); for the Docker stack tunnel `http://localhost:${APP_PORT}`
-and add the tunnel's `https://` origin to `KIOSK_STREAM_ORIGINS`. Stop the tunnel after testing.
+`DEV_ALLOWED_HOSTS` (`frontend/.env`); for the Docker stack run
+`cloudflared tunnel --url https://localhost --no-tls-verify` (tunnelling the HTTP port would loop
+on the redirect) and add the tunnel's `https://` origin to `KIOSK_STREAM_ORIGINS`. Stop the tunnel after testing.
 
 To validate configuration without starting containers:
 
@@ -566,20 +566,37 @@ policies. Do not infer encryption merely from the column name.
 ### Backend server and kiosk LAN deployment
 
 Keep OpenCV, both ONNX models, PostgreSQL access, and all face templates on the backend
-server. Kiosks need only a current Chrome/Edge browser, a camera, a microphone, and network access to
-the HTTPS site serving the frontend and backend. Run Uvicorn behind a managed reverse proxy, binding the private
-application listener deliberately (for example `--host 0.0.0.0`) and restricting its port at
-the host/network firewall. Terminate TLS at the reverse proxy and expose only HTTPS/WSS to
-kiosks, even on the school LAN.
+server. Kiosks need only a current Chrome/Edge browser, a camera, a microphone, and network
+access to the server's HTTPS port. The Compose stack is the deployment: Uvicorn and the
+databases stay on the private Compose network, and the Nginx container terminates TLS and is
+the only thing published (443, plus the redirecting `APP_PORT`). Expose only HTTPS/WSS to
+kiosks, even on the school LAN; allow 80/443 through the server firewall and nothing else.
 
-Build the production frontend with `VITE_API_BASE_URL` set to the stable HTTPS backend DNS
-name, not a hard-coded machine IP or localhost. The WebSocket URL is derived from this value
-and becomes WSS automatically. Also build with `VITE_ENABLE_DEV_CONTROLS=false` and
+TLS uses a certificate from a local CA made with [mkcert](https://github.com/FiloSottile/mkcert),
+on the server, from the repository root:
+
+```powershell
+mkcert -install                     # once: creates the local CA
+mkcert -cert-file certs/server.pem -key-file certs/server-key.pem kiosk-server.library.lan 192.168.1.10
+mkcert -CAROOT                      # folder holding rootCA.pem
+```
+
+Name the server's DNS name and/or LAN IP, whichever kiosks will type; the certificate only
+covers the names listed. Copy **only `rootCA.pem`** to each kiosk and trust it from an
+elevated prompt with `certutil -addstore -f Root rootCA.pem` (Chrome and Edge on Windows use
+that store). Never copy `rootCA-key.pem` off the server: anyone holding it can impersonate any
+site to those kiosks. mkcert certificates last about two years; reissue the server pair before
+then and run `docker compose restart frontend`. HSTS is deliberately not sent, so a broken
+certificate rollout cannot lock kiosks out.
+
+Leave `VITE_API_BASE_URL` empty for the Compose build: the kiosk then calls the origin it was
+opened from, and the WebSocket URL becomes WSS automatically. Also build with `VITE_ENABLE_DEV_CONTROLS=false` and
 `VITE_ENABLE_MOCK_FALLBACK=false`. Because Vite embeds these values at build time, changing
 them requires rebuilding the frontend image (`frontend/Dockerfile`).
 
 Set `KIOSK_STREAM_ORIGINS` to the smallest reviewed comma-separated allowlist: the exact
-HTTPS origin(s) the kiosk page is served from. Never add `null`; origin allowlisting alone is not device authentication; each kiosk must also hold its own
+HTTPS origin(s) the kiosk page is served from, without a port (for example
+`https://kiosk-server.library.lan`, and `https://192.168.1.10` if kiosks use the IP). Never add `null`; origin allowlisting alone is not device authentication; each kiosk must also hold its own
 device key (see *Access control*). A key stored on the kiosk can be copied by anyone with
 physical or OS access to it, so still restrict the backend to the kiosk VLAN/firewall and
 consider mTLS before treating a shared or hostile LAN as trusted; rotate a key whenever a
