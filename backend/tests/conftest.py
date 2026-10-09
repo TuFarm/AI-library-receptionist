@@ -7,7 +7,9 @@ from uuid import UUID
 # test defaults before the settings object is created; an explicitly exported value still wins.
 for _name, _value in {"FACE_PROVIDER": "mock", "AI_PROVIDER": "mock", "VOICE_PROVIDER": "mock",
                       "REPORT_JOB_ENABLED": "false", "MEDIA_RETAIN_DEVELOPMENT_FILES": "false",
-                      "KIOSK_STREAM_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173"}.items():
+                      "KIOSK_STREAM_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173",
+                      # Fixed test-only key so enrollment exercises the encrypted template path.
+                      "FACE_TEMPLATE_KEY": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}.items():
     os.environ.setdefault(_name, _value)
 
 import pytest  # noqa: E402

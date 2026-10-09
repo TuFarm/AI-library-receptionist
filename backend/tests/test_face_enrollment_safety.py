@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.database import get_db
+from app.core.template_crypto import decrypt_template, is_encrypted
 from app.main import app
 from app.services import face_service
 from app.services.face_service import (
@@ -321,7 +322,9 @@ def test_opencv_single_quality_face_enrollment_succeeds_with_versioned_profile(
         assert len(users) == len(profiles) == 1
         assert profiles[0].model_name == "opencv-sface-128d"
         assert profiles[0].model_version == "2021dec"
-        assert json.loads(profiles[0].face_template_encrypted) == [1.0] + [0.0] * 127
+        stored = profiles[0].face_template_encrypted
+        assert is_encrypted(stored) and b"1.0" not in stored
+        assert json.loads(decrypt_template(None, users[0].id, stored)) == [1.0] + [0.0] * 127
         assert database.commits == 1
         assert not list(tmp_path.rglob("*.jpg"))
     finally:

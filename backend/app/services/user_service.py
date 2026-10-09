@@ -49,11 +49,9 @@ def apply_profile_update(db: Session, user: User, values: dict) -> User:
 
 
 def delete_face_profiles(db: Session, user_id: UUID) -> int:
-    profiles = db.scalars(select(FaceProfile).where(
-        FaceProfile.user_id == user_id, FaceProfile.active.is_(True), FaceProfile.deleted_at.is_(None)
-    )).all()
+    # Every profile, including inactive or rollback ones: erasure must remove all biometric material.
+    profiles = db.scalars(select(FaceProfile).where(FaceProfile.user_id == user_id)).all()
     for profile in profiles:
-        # Explicit user-confirmed hard deletion removes the biometric material.
         db.delete(profile)
     user = db.get(User, user_id)
     if user is not None:

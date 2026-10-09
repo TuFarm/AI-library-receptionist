@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chooseVoiceInput } from "./useServerSpeechRecognition";
+import { chooseVoiceInput, voicePrivacyNotice } from "./useServerSpeechRecognition";
 import { voiceApi } from "../services/apiClient";
 
 afterEach(() => { vi.unstubAllGlobals(); });
@@ -30,5 +30,16 @@ describe("server transcription request", () => {
     const file = (options.body as FormData).get("audio_file") as File;
     expect(file.name).toBe("utterance.webm");
     expect(file.type).toBe("audio/webm");  // the backend allow-list has no codec suffix
+  });
+});
+
+describe("voice privacy notice", () => {
+  const chrome = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+  const edge = `${chrome} Edg/140.0.0.0`;
+  it("names the service that actually receives the audio", () => {
+    expect(voicePrivacyNotice("server", chrome)).toContain("Google Gemini");
+    expect(voicePrivacyNotice("browser", chrome)).toContain("Google");
+    expect(voicePrivacyNotice("browser", edge)).toContain("Microsoft");
+    expect(voicePrivacyNotice(null, chrome)).toBeNull();
   });
 });

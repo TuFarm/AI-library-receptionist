@@ -1,10 +1,11 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from time import perf_counter
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import owned_session, require_kiosk_device
@@ -12,7 +13,8 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.responses import success_response
-from app.models.schema import Device, FaceAuthenticationLog, FaceProfile, User
+from app.core.template_crypto import decrypt_template, encrypt_template
+from app.models.schema import Device, FaceAuthenticationLog, FaceEnrollmentRequest, FaceProfile, User
 from app.services.face_service import (
     FaceImageError, FaceProviderUnavailable, FaceService, get_face_provider,
     MultipleFacesDetectedError, NoFaceDetectedError,
@@ -30,6 +32,35 @@ def _user_data(user: User) -> dict:
         "admission_year": user.admission_year, "student_year": calculate_student_year(user.admission_year)}
 
 
+# A retry after a lost response replays the first result for this long.
+ENROLLMENT_REPLAY_WINDOW = timedelta(hours=24)
+
+
+def _enrolled_response(user: User, profile: FaceProfile, quality_score: float) -> dict:
+    return success_response({"face_profile_id": str(profile.id), "user_id": str(user.id),
+        "user": _user_data(user), "provider": settings.face_provider, "quality_score": quality_score,
+        "next_state": "WELCOME"}, "Đăng ký khuôn mặt thành công.")
+
+
+def _replay_enrollment(db: Session, device: Device, enrollment_id: UUID) -> dict | None:
+    """The stored result of an earlier request with this key, or None if there was none."""
+    earlier = db.scalar(select(FaceEnrollmentRequest).where(FaceEnrollmentRequest.request_key == enrollment_id))
+    if earlier is None:
+        return None
+    if earlier.device_id != device.id:
+        raise AppError(409, "ENROLLMENT_ID_CONFLICT", "Mã yêu cầu đăng ký không hợp lệ. Vui lòng chụp lại.")
+    profile = db.get(FaceProfile, earlier.face_profile_id) if earlier.face_profile_id else None
+    user = db.get(User, earlier.user_id)
+    if (profile is None or not profile.active or profile.deleted_at is not None or user is None
+            or user.deleted_at is not None or datetime.now(UTC) - _aware(earlier.created_at) > ENROLLMENT_REPLAY_WINDOW):
+        raise AppError(409, "ENROLLMENT_ALREADY_PROCESSED", "Yêu cầu đăng ký này đã được xử lý. Vui lòng chụp lại.")
+    return _enrolled_response(user, profile, float(profile.quality_score or 0))
+
+
+def _aware(moment: datetime) -> datetime:
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
 @router.post("/enroll")
 async def enroll(
     image_file: UploadFile = File(),
@@ -43,12 +74,19 @@ async def enroll(
     admission_year: int | None = Form(default=None),
     session_id: UUID | None = Form(default=None),
     face_consent: bool = Form(default=False),
+    # Client-generated per captured image; a retry of the same image reuses it.
+    enrollment_id: UUID | None = Form(default=None),
     device: Device = Depends(require_kiosk_device),
     db: Session = Depends(get_db),
 ) -> dict:
     # No biometric processing at all without the visitor's explicit consent.
     if not face_consent:
         raise AppError(422, "FACE_CONSENT_REQUIRED", "Vui lòng đồng ý với điều khoản lưu mẫu khuôn mặt trước khi đăng ký.")
+    if enrollment_id is not None:
+        # Checked before the image is saved or analysed: a replay never touches biometrics.
+        replay = _replay_enrollment(db, device, enrollment_id)
+        if replay is not None:
+            return replay
     storage = MediaStorageService()
     try:
         path = await storage.save_image(image_file, "enrollments")
@@ -138,7 +176,7 @@ async def enroll(
             profile = FaceProfile(user_id=user.id, enrolled_at=datetime.now(UTC), active=True)
             db.add(profile)
         profile.face_template_ref = result.template_ref
-        profile.face_template_encrypted = result.template_bytes
+        profile.face_template_encrypted = encrypt_template(user.id, result.template_bytes)
         profile.model_name = result.model_name
         profile.model_version = result.model_version
         profile.quality_score = Decimal(str(result.quality_score))
@@ -149,11 +187,23 @@ async def enroll(
             session.identified = True
         record_event(db, event_type="FACE_ENROLLED", session_id=session_id, user_id=user.id,
             device_id=device.id, success=True)
-        db.commit()
+        if enrollment_id is not None:
+            db.flush()
+            db.execute(delete(FaceEnrollmentRequest).where(
+                FaceEnrollmentRequest.created_at < datetime.now(UTC) - ENROLLMENT_REPLAY_WINDOW))
+            db.add(FaceEnrollmentRequest(request_key=enrollment_id, device_id=device.id, user_id=user.id,
+                face_profile_id=profile.id, created_at=datetime.now(UTC)))
+        try:
+            db.commit()
+        except IntegrityError:
+            # A concurrent duplicate committed first: answer with its result instead.
+            db.rollback()
+            replay = _replay_enrollment(db, device, enrollment_id) if enrollment_id is not None else None
+            if replay is None:
+                raise
+            return replay
         db.refresh(profile)
-        return success_response({"face_profile_id": str(profile.id), "user_id": str(user.id),
-            "user": _user_data(user), "provider": settings.face_provider, "quality_score": result.quality_score,
-            "next_state": "WELCOME"}, "Đăng ký khuôn mặt thành công.")
+        return _enrolled_response(user, profile, result.quality_score)
     except MediaValidationError as exc:
         db.rollback()
         raise AppError(400, "INVALID_IMAGE", str(exc)) from exc
@@ -186,15 +236,16 @@ async def verify(session_id: UUID | None = Form(default=None), image_file: Uploa
     try:
         path = await storage.save_image(image_file, "verification")
         provider = get_face_provider()
-        profiles = db.scalars(select(FaceProfile).where(
+        profiles = db.scalars(select(FaceProfile).join(User).where(
             FaceProfile.active.is_(True),
             FaceProfile.deleted_at.is_(None),
+            User.deleted_at.is_(None),
             FaceProfile.model_name == provider.name,
             FaceProfile.model_version == provider.model_version,
         ).order_by(FaceProfile.enrolled_at)).all()
         candidates = [(
             profile.user_id,
-            profile.face_template_encrypted,
+            decrypt_template(profile.id, profile.user_id, profile.face_template_encrypted),
             profile.face_template_ref,
             profile.model_name,
             profile.model_version,

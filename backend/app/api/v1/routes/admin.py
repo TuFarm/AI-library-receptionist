@@ -102,15 +102,21 @@ def status(db: Session = Depends(get_db)) -> dict:
         {"module": "Kiosk flow", "status": "Realtime"},
         {"module": "FaceID", "status": settings.face_provider,
          "warning": "Chế độ mock chỉ dành cho kiểm thử, không nhận diện danh tính thật."
-            if settings.face_provider == "mock" else None},
+            if settings.face_provider == "mock" else
+            "Chưa có kiểm tra người thật (liveness): ảnh in hoặc ảnh trên màn hình của một sinh viên đã đăng ký "
+            "có thể được nhận là sinh viên đó, mở hồ sơ của họ và đăng ký lại Face ID. "
+            "Chỉ dùng Face ID để chào hỏi, không dùng để xác thực."},
         {"module": "AI", "status": settings.ai_provider,
          "warning": "Chế độ mock: câu trả lời được trích nguyên văn từ tài liệu, không dùng mô hình ngôn ngữ."
             if settings.ai_provider != "gemini" else None},
         {"module": "RAG", "status": f"{documents} tài liệu",
          "warning": None if documents else "Chưa có tài liệu tri thức đang hoạt động; AI sẽ từ chối trả lời thông tin chính thức."},
         {"module": "Voice", "status": settings.voice_provider,
-         "warning": "Nhận dạng giọng nói chạy trên trình duyệt kiosk; trình duyệt không có Web Speech (như Firefox) sẽ chỉ nhập bằng bàn phím."
-            if settings.voice_provider in {"mock", "browser"} else None},
+         "warning": "Nhận dạng giọng nói chạy trên trình duyệt kiosk (Chrome gửi âm thanh tới Google, Edge tới Microsoft); "
+            "trình duyệt không có Web Speech (như Firefox) sẽ chỉ nhập bằng bàn phím."
+            if settings.voice_provider in {"mock", "browser"} else
+            "Giọng nói của khách được gửi tới Google Gemini để chuyển thành chữ; thông báo quyền riêng tư phải nêu rõ điều này."
+            if settings.voice_provider == "gemini" else None},
         {"module": "Báo cáo ngày", "status": "Tự động" if settings.report_job_enabled else "Thủ công",
          "warning": (f"Lần chạy gần nhất lỗi: {job_state.last_error}" if job_state.last_error else
                      f"Chạy gần nhất: {job_state.last_run_at:%Y-%m-%d %H:%M} UTC" if job_state.last_run_at else

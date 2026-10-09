@@ -12,6 +12,16 @@ export function chooseVoiceInput(setting: string | undefined, env: { browserSpee
   return env.mediaRecorder ? "server" : null;
 }
 
+/** Tells the visitor where their voice goes before they speak. Neither mode keeps audio on the kiosk. */
+export function voicePrivacyNotice(mode: VoiceInputMode | null, userAgent: string): string | null {
+  if (mode === "server") return "Giọng nói của bạn được gửi qua máy chủ thư viện tới Google Gemini để chuyển thành chữ; thư viện không lưu bản ghi âm, chỉ lưu nội dung câu hỏi.";
+  if (mode === "browser") {
+    const service = /\bEdg\//.test(userAgent) ? "Microsoft" : "Google";
+    return `Giọng nói của bạn được trình duyệt gửi tới dịch vụ nhận dạng của ${service} để chuyển thành chữ; thư viện chỉ lưu nội dung câu hỏi.`;
+  }
+  return null;
+}
+
 const SAMPLE_MS = 100;
 const SPEECH_RMS = 0.035;        // level treated as speech
 const SILENCE_AFTER_SPEECH_MS = 1200;

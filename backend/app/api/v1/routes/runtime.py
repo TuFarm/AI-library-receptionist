@@ -18,6 +18,7 @@ from app.api.v1.routes.voice import save_browser_transcript
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.errors import AppError
+from app.core.template_crypto import decrypt_template
 from app.models.schema import Conversation, FaceAuthenticationLog, FaceProfile, User, UserSession
 from app.schemas.ai import AIRuntimeRequest
 from app.schemas.voice import BrowserTranscriptCreate
@@ -119,7 +120,7 @@ def load_candidates():
             FaceProfile.model_version == provider.model_version,
         )).all()
         return [(
-            p.user_id, p.face_template_encrypted, p.face_template_ref,
+            p.user_id, decrypt_template(p.id, p.user_id, p.face_template_encrypted), p.face_template_ref,
             p.model_name, p.model_version,
         ) for p in profiles]
 

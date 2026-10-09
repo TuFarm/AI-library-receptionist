@@ -100,6 +100,18 @@ class FaceProfile(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     user: Mapped[User] = relationship(back_populates="face_profiles")
 
 
+class FaceEnrollmentRequest(UUIDPrimaryKeyMixin, Base):
+    """Idempotency record for POST /face/enroll: a retried request replays the first result."""
+    __tablename__ = "face_enrollment_requests"
+
+    request_key: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True)
+    device_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # Erasing the Face ID nulls this, so the old request can no longer be replayed as a success.
+    face_profile_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("face_profiles.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class Device(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     __tablename__ = "devices"
     __table_args__ = (UniqueConstraint("api_key_hash", name="uq_devices_api_key_hash"),)

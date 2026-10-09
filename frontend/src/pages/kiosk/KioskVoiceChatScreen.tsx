@@ -6,7 +6,7 @@ import { AssistantAvatar, ListeningIndicator } from "../../components/kiosk/Kios
 import { canActivateMicrophone, KIOSK_TIMING, wait } from "../../config/kioskRuntime";
 import { useKioskFlow } from "../../hooks/useKioskFlow";
 import { useSpeechRecognition } from "../../hooks/useSpeechRecognition";
-import { chooseVoiceInput, useServerSpeechRecognition } from "../../hooks/useServerSpeechRecognition";
+import { chooseVoiceInput, useServerSpeechRecognition, voicePrivacyNotice } from "../../hooks/useServerSpeechRecognition";
 import { useTextToSpeech } from "../../hooks/useTextToSpeech";
 import type { MessageInputMethod, VoiceState } from "../../types/kiosk";
 import ChatBubble from "../../components/kiosk/ChatBubble";
@@ -76,6 +76,7 @@ export default function KioskVoiceChatScreen({ flow }: { flow: ReturnType<typeof
   const inputMode = chooseVoiceInput(import.meta.env.VITE_VOICE_INPUT as string | undefined, {
     browserSpeech: browserRecognition.isSupported, mediaRecorder: serverRecognition.isSupported,
   });
+  const privacyNotice = voicePrivacyNotice(inputMode, typeof navigator !== "undefined" ? navigator.userAgent : "");
   const recognition = inputMode === "server" ? serverRecognition : { ...browserRecognition, isSupported: inputMode === "browser" };
   recognitionControlRef.current = {
     start: recognition.startListening, stop: recognition.stopListening, supported: recognition.isSupported,
@@ -165,6 +166,7 @@ export default function KioskVoiceChatScreen({ flow }: { flow: ReturnType<typeof
       <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Nhập bằng bàn phím" aria-label="Nhập câu hỏi bằng bàn phím"/>
       <button disabled={!input.trim() || flow.isProcessing || tts.isSpeaking}>Gửi câu hỏi ↑</button>
     </form>}
+    {privacyNotice && <p className="voice-privacy-notice">{privacyNotice}</p>}
     <div className="voice-chat-actions">
       <span>{recognition.error ?? tts.error ?? tts.notice ?? (!recognition.isSupported
         ? "Trình duyệt hiện không hỗ trợ nhận dạng giọng nói. Bạn có thể nhập câu hỏi bằng bàn phím." : "Hội thoại giọng nói theo lượt · vi-VN")}</span>

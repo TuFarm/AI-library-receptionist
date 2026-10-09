@@ -61,7 +61,7 @@ Realtime frames remain in memory. Camera requests 1920×1080 preferably (1280×7
 
 Voice is turn-based, not Gemini Live/full-duplex: greeting → STT (`vi-VN`) → final transcript → AI request → browser TTS → listening. Keyboard input is always a fallback, and every answer is also shown as text. Raw microphone audio is not sent through the WebSocket.
 
-`VITE_VOICE_INPUT` picks the STT source: `auto` (default) uses browser Web Speech (Chrome/Edge); in browsers without it (e.g. Firefox) the kiosk records one utterance with `MediaRecorder` (it ends after 1.2 s of silence, 15 s at most, and is discarded if nobody spoke) and posts it to `POST /voice/transcribe`. `browser` or `server` force one source. Server STT needs `VOICE_PROVIDER=gemini` and `GEMINI_API_KEY`: the utterance is sent inline to the configured `GEMINI_MODEL`, the temporary file is deleted afterwards (unless `MEDIA_RETAIN_DEVELOPMENT_FILES`), and a failure or silence returns an empty transcript rather than a guess. Enabling it sends visitors' voice to Google, so the deployment's privacy notice must say so. The mock provider returns a fixed sentence for tests; the kiosk refuses to submit it as a question unless `VITE_ENABLE_MOCK_FALLBACK=true`. Speech output still uses the OS voices behind `speechSynthesis`; install a Vietnamese voice on the kiosk machine.
+`VITE_VOICE_INPUT` picks the STT source: `auto` (default) uses browser Web Speech (Chrome/Edge); in browsers without it (e.g. Firefox) the kiosk records one utterance with `MediaRecorder` (it ends after 1.2 s of silence, 15 s at most, and is discarded if nobody spoke) and posts it to `POST /voice/transcribe`. `browser` or `server` force one source. Server STT needs `VOICE_PROVIDER=gemini` and `GEMINI_API_KEY`: the utterance is sent inline to the configured `GEMINI_MODEL`, the temporary file is deleted afterwards (unless `MEDIA_RETAIN_DEVELOPMENT_FILES`), and a failure or silence returns an empty transcript rather than a guess. Enabling it sends visitors' voice to Google. Browser Web Speech is not local either: Chrome sends the audio to Google and Edge to Microsoft. The voice screen therefore shows a one-line notice naming the service for the active mode (`voicePrivacyNotice`), and the admin status page repeats it; the deployment's written privacy notice must say the same. The mock provider returns a fixed sentence for tests; the kiosk refuses to submit it as a question unless `VITE_ENABLE_MOCK_FALLBACK=true`. Speech output still uses the OS voices behind `speechSynthesis`; install a Vietnamese voice on the kiosk machine.
 
 ## API
 
@@ -195,11 +195,13 @@ There are 30 tables:
 
 Keys are UUIDs. Mutable business/configuration rows use timestamp/soft-delete mixins when appropriate; factual logs are append-only. Unknown visitors are valid (`user_sessions.user_id` and `face_authentication_logs.user_id` are nullable). `student_year` is derived from `admission_year`, never stored.
 
-Never store raw face photos in user data. `face_profiles` holds a template/reference only. The local development adapter stores a serialized embedding and is **not** production encryption. A real deployment still needs managed encryption keys, liveness/anti-spoofing, audit, a retention policy, and demographic performance validation.
+Never store raw face photos in user data. `face_profiles` holds a template/reference only.
+
+**Template encryption.** `face_template_encrypted` is encrypted by the application with AES-256-GCM (`app/core/template_crypto.py`) under `FACE_TEMPLATE_KEY`, base64 of 32 random bytes (`python -c "import base64,os;print(base64.b64encode(os.urandom(32)).decode())"`). Each row carries a key id and a fresh nonce and is bound to its owner's user id, so a template copied to another user, a wrong key, or a tampered row is skipped (logged by profile id only) instead of matched. `ENVIRONMENT=production` refuses to start without the key and ignores unencrypted rows; development without a key still stores the legacy plaintext format. Encrypt rows written before the key existed with `python scripts/encrypt_face_templates.py --dry-run`, then without `--dry-run` (safe to repeat; in Docker prefix `docker compose exec backend`). **Losing the key makes every Face ID unusable** and everyone must re-enroll: keep a copy outside the server and outside database backups, which would otherwise hold both halves. There is no key rotation yet; changing the key means re-enrollment. Still open: liveness/anti-spoofing, audit, a retention policy, and demographic performance validation.
 
 **Consent.** Before the camera step of any enrollment (new or re-enrollment) the kiosk shows what is stored, why, and how to erase it, and requires an explicit tick. `POST /face/enroll` rejects a request without `face_consent=true` (422 `FACE_CONSENT_REQUIRED`) before the image is saved or analysed, and on success records `users.face_consent_at` and `users.face_consent_version` (`FACE_CONSENT_VERSION`, which must match `FACE_CONSENT_VERSION` in `FaceRegistrationScreen.tsx`; bump both when the text changes). Erasing the Face ID from the kiosk or the admin UI also clears the consent record.
 
-**Liveness is not implemented.** Nothing distinguishes a live face from a printed photo or a screen. This is a deliberate, documented gap: a heuristic (blink or head-turn checks) would give a false sense of security. Real anti-spoofing needs a dedicated, calibrated presentation-attack-detection model validated on consented data. Until then, treat Face ID as a convenience greeting, never as authentication for anything sensitive.
+**Liveness is not implemented.** Nothing distinguishes a live face from a printed photo or a screen. This is a deliberate, documented gap: a heuristic (blink or head-turn checks) would give a false sense of security. Real anti-spoofing needs a dedicated, calibrated presentation-attack-detection model validated on consented data. Until then, treat Face ID as a convenience greeting, never as authentication for anything sensitive. Concretely, today a photo of an enrolled student yields an identified kiosk session that shows that student's profile (including email and phone), can edit it, can erase their Face ID, and can re-enroll, replacing their template with the presenter's face. The admin status page states this gap whenever a real Face ID provider is configured.
 
 Knowledge chunks, selected conversation context, feedback, prompt versions, and preferences can support RAG and controlled improvement. The system must not silently train itself from DB data. Any training use needs explicit consent, anonymization, governance, and separate approval. `daily_report_metrics` is derived and never replaces raw facts.
 
@@ -513,7 +515,7 @@ label shown by the kiosk; do not enable verbose frame/model logging.
 | Direct REST 0/1/multiple | Send three consented external fixtures directly to `POST /api/v1/face/enroll` using disposable users and compare profile metadata before/after each request. | 0 faces: HTTP 422 `NO_FACE_DETECTED`, no mutation. One valid face: success and one `opencv-sface-128d` / `2021dec` profile. Two or more: HTTP 422 `MULTIPLE_FACES_DETECTED` with count, no mutation. |
 | Dark camera | Test the approved minimum lighting plus a clearly inadequate lighting case. | Adequate samples meet the approved recognition/rejection target. Inadequate samples receive quality guidance or unknown; never a wrong identity and never an enrollment. |
 | Complex background | Repeat enrollment/recognition against the representative busiest background, with bystanders outside and then inside the camera field. | Background patterns do not become faces; a bystander in frame invokes exact-one blocking; no wrong identity is returned. |
-| Network loss | Disconnect WebSocket during stability and after `face_quality_good`, reconnect, then test a connection loss while REST enrollment is in flight. | Reconnect cannot reuse prior evidence and requires a new stability window. For an ambiguous REST result, check the database before any manual retry; do not blindly retry enrollment. |
+| Network loss | Disconnect WebSocket during stability and after `face_quality_good`, reconnect, then test a connection loss while REST enrollment is in flight. | Reconnect cannot reuse prior evidence and requires a new stability window. An in-flight REST enrollment that loses its response is resent once with the same `enrollment_id` and yields exactly one profile; a fresh capture is a new enrollment. |
 | Model unavailable | On a staging restart only, remove or invalidate one configured model, then restore it. | Startup/provider creation fails clearly without exposing paths and without mock fallback or database mutation. Restoring reviewed files and restarting recovers service. |
 
 For a real run, retain only an anonymous pass/fail matrix, error-code counts, P50/P95 stage
@@ -550,18 +552,19 @@ Rollback is version-aware:
    deliberate re-enrollment or an approved regeneration from retained source images; there
    is no safe vector-to-vector conversion.
 
-Two current boundaries require an explicit deployment decision. First, the WebSocket
+One boundary requires an explicit deployment decision: the WebSocket
 evidence guard is enforced by the kiosk client, while `POST /face/enroll` does not accept a
 server-issued, single-use evidence token; a client that bypasses the kiosk can submit another
 single-face image. Require an authenticated kiosk boundary or add server-bound evidence
-before rollout if hostile/direct clients are in scope. Second, enrollment has no idempotency
-key, so a network loss after commit has an ambiguous client outcome. Operators must inspect
-profile state before retrying, or idempotent enrollment must be added before unattended use.
-Third, despite the historical `face_template_encrypted` column name, the current application
-serializes embeddings as JSON bytes and does not encrypt them itself. Before storing real
-school biometric profiles, approve key management and application-layer envelope encryption
-(or an equivalent reviewed data-at-rest control), retention/deletion, backup, and access
-policies. Do not infer encryption merely from the column name.
+before rollout if hostile/direct clients are in scope. Enrollment is idempotent: the kiosk
+sends a fresh `enrollment_id` with each captured image and, when no response arrives
+(network loss, timeout, proxy 502/504), resends the same image once with the same id. The
+backend stores the id with the profile in one transaction (`face_enrollment_requests`) and
+answers a repeat from the same kiosk within 24 hours with the first result, without saving or
+analysing the image again; the same id from another kiosk (409 `ENROLLMENT_ID_CONFLICT`) or
+after the Face ID was erased (409 `ENROLLMENT_ALREADY_PROCESSED`) is refused. Templates are
+encrypted at rest (see *Data model and boundaries*); retention, backup and access policies for them still
+need approval before real school biometric profiles are stored.
 
 ### Backend server and kiosk LAN deployment
 

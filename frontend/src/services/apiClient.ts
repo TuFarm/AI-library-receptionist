@@ -55,19 +55,36 @@ export const kioskApi = {
   endSession: (sessionId: string, exitReason = "COMPLETED") => apiClient.post<{ session_id: string; duration_seconds: number | null; next_state: "IDLE" }>(`/kiosk/sessions/${sessionId}/end`, { exit_reason: exitReason }),
   logEvent: (sessionId: string, event: { event_type: string; input_method?: string; content_summary?: string; success?: boolean }) => apiClient.post<{ event_id: string }>(`/kiosk/sessions/${sessionId}/events`, event),
 };
+/** True when no answer from the backend arrived (network loss, timeout, proxy 502/504): the request may or may not have run. */
+export function isLostResponse(error: unknown): boolean {
+  return error instanceof ApiClientError && !error.code && (error.status === undefined || error.status === 502 || error.status === 504);
+}
+const ENROLL_ATTEMPTS = 2;
+const ENROLL_RETRY_DELAY_MS = 1000;
 export const faceApi = {
-  enrollFace: ({ sessionId, userId, deviceCode, imageBlob, fields }: {
-    sessionId?: string; userId?: string; deviceCode: string; imageBlob: Blob; fields: FaceRegistrationFields;
+  /**
+   * One captured image = one enrollment_id. If the response is lost, the same image is resent
+   * with the same id, and the backend replays the first result instead of enrolling twice.
+   */
+  enrollFace: async ({ sessionId, userId, deviceCode, imageBlob, fields, enrollmentId = crypto.randomUUID() }: {
+    sessionId?: string; userId?: string; deviceCode: string; imageBlob: Blob; fields: FaceRegistrationFields; enrollmentId?: string;
   }) => {
     const form = new FormData();
     if (sessionId) form.append("session_id", sessionId);
     if (userId) form.append("user_id", userId);
     form.append("device_code", deviceCode);
+    form.append("enrollment_id", enrollmentId);
     form.append("image_file", imageBlob, "kiosk-enrollment.jpg");
     Object.entries(fields).forEach(([key, value]) => {
       if (value !== undefined && value !== "") form.append(key, String(value));
     });
-    return apiClient.postForm<FaceEnrollmentResult>("/face/enroll", form);
+    for (let attempt = 1; ; attempt++) {
+      try { return await apiClient.postForm<FaceEnrollmentResult>("/face/enroll", form); }
+      catch (error) {
+        if (attempt >= ENROLL_ATTEMPTS || !isLostResponse(error)) throw error;
+        await new Promise((resolve) => setTimeout(resolve, ENROLL_RETRY_DELAY_MS));
+      }
+    }
   },
 };
 // Only the visitor identified in the kiosk's own live session can be edited from the kiosk.

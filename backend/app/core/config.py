@@ -1,7 +1,9 @@
+import base64
+import binascii
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,6 +32,9 @@ class Settings(BaseSettings):
     face_recognition_cadence_ms: int = Field(default=500, ge=100, le=5000)
     face_gallery_ttl_ms: int = Field(default=5000, ge=0, le=300000)
     face_diagnostics_enabled: bool = False
+    # Base64 of 32 random bytes; encrypts stored face templates (AES-256-GCM). Required in
+    # production. Losing it makes every enrolled Face ID unusable, so back it up separately.
+    face_template_key: str = Field(default="", repr=False)
     voice_provider: str = "mock"
     ai_provider: str = "mock"
     kiosk_session_timeout_seconds: int = 60
@@ -58,6 +63,33 @@ class Settings(BaseSettings):
     # Kiosk devices authenticate every REST call and the WebSocket with a key
     # issued from the admin UI. `last_seen_at` is written at most this often.
     device_last_seen_interval_seconds: int = Field(default=60, ge=0)
+
+    @field_validator("face_template_key")
+    @classmethod
+    def check_face_template_key(cls, value: str) -> str:
+        value = value.strip()
+        if value:
+            try:
+                key = base64.b64decode(value, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError("FACE_TEMPLATE_KEY must be base64") from exc
+            if len(key) != 32:
+                raise ValueError("FACE_TEMPLATE_KEY must decode to exactly 32 bytes")
+        return value
+
+    @model_validator(mode="after")
+    def require_production_template_key(self) -> "Settings":
+        if self.is_production and not self.face_template_key:
+            raise ValueError("FACE_TEMPLATE_KEY is required when ENVIRONMENT=production")
+        return self
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.strip().lower() == "production"
+
+    @property
+    def face_template_key_bytes(self) -> bytes | None:
+        return base64.b64decode(self.face_template_key) if self.face_template_key else None
 
     @field_validator("database_url", mode="before")
     @classmethod
